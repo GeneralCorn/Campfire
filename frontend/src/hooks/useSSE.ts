@@ -2,10 +2,22 @@
 
 import { useCallback, useRef } from "react";
 import { useAppStore } from "@/stores/useAppStore";
-import type { TeammateId } from "@/types";
+import { initAudio, playChunk, stopAll } from "@/lib/audio-player";
+import type { TeammateId, TeammateState } from "@/types";
+
+/** Map sentiment string from LLM → sprite state for richer animations. */
+function sentimentToState(sentiment: string | undefined): TeammateState {
+  if (!sentiment) return "talking";
+  const s = sentiment.toLowerCase();
+  if (s === "skeptical" || s === "critical" || s === "analytical") return "reacting";
+  if (s === "enthusiastic" || s === "supportive" || s === "excited") return "agreeing";
+  if (s === "surprised" || s === "confused") return "interrupted";
+  return "talking";
+}
 
 export function useTeamChat() {
   const abortRef = useRef<AbortController | null>(null);
+  const audioInitialized = useRef(false);
 
   const addMessage = useAppStore((s) => s.addMessage);
   const appendToMessage = useAppStore((s) => s.appendToMessage);
@@ -16,9 +28,12 @@ export function useTeamChat() {
   const setIsLive = useAppStore((s) => s.setIsLive);
   const addSandboxEntry = useAppStore((s) => s.addSandboxEntry);
   const addMemory = useAppStore((s) => s.addMemory);
+  const setCurrentSessionId = useAppStore((s) => s.setCurrentSessionId);
 
   // Track current streaming message per teammate
   const currentMsgIds = useRef<Record<string, string>>({});
+  // Track sentiment per teammate for sprite state selection
+  const currentSentiment = useRef<Record<string, string>>({});
   const memCounter = useRef(0);
 
   const sendTask = useCallback(
@@ -29,6 +44,10 @@ export function useTeamChat() {
 
       setIsStreaming(true);
       setIsLive(true);
+
+      // Generate session ID for debrief memory queries
+      const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setCurrentSessionId(sessionId);
 
       try {
         const response = await fetch("/api/team-chat", {
@@ -88,6 +107,11 @@ export function useTeamChat() {
       }
 
       case "task_result": {
+        // Store sentiment for sprite state selection during talking
+        if (teammate && data.sentiment) {
+          currentSentiment.current[teammate] = data.sentiment as string;
+        }
+
         // Add thinking behind toggle, sandbox action
         if (data.action && typeof data.action === "object") {
           const action = data.action as { type: string; detail: string };
@@ -104,10 +128,36 @@ export function useTeamChat() {
         break;
       }
 
+      case "voice_text": {
+        // Full subtitle text emitted once — create the chat message
+        if (!teammate) break;
+
+        const text = (data.text as string) || "";
+        const msgId = `live-${teammate}-${Date.now()}`;
+        currentMsgIds.current[teammate] = msgId;
+
+        // Use sentiment to pick a richer sprite state
+        const sentiment = currentSentiment.current[teammate];
+        const spriteState = sentimentToState(sentiment);
+        setTeammateState(teammate, spriteState);
+
+        addMessage({
+          id: msgId,
+          sender: teammate,
+          content: text,
+          confidence: data.confidence as number | undefined,
+          sentiment: sentiment,
+          timestamp: Date.now(),
+          channel: "team-room",
+          isStreaming: true,
+        });
+        break;
+      }
+
+      // Legacy: still handle voice_chunk for backwards compat
       case "voice_chunk": {
         if (!teammate) break;
 
-        // Create message on first chunk, append on subsequent
         const existingId = currentMsgIds.current[teammate];
         const text = (data.text as string) || "";
 
@@ -119,7 +169,6 @@ export function useTeamChat() {
             id: msgId,
             sender: teammate,
             content: text + " ",
-            thinking: (data.thinking as string) || undefined,
             timestamp: Date.now(),
             channel: "team-room",
             isStreaming: true,
@@ -127,8 +176,20 @@ export function useTeamChat() {
         } else {
           appendToMessage(existingId, text + " ");
         }
+        break;
+      }
 
-        // TODO: Queue audio for playback if data.audio exists
+      case "audio_chunk": {
+        // Initialize audio context on first chunk (needs user gesture context)
+        if (!audioInitialized.current) {
+          initAudio();
+          audioInitialized.current = true;
+        }
+
+        const audio = data.audio as string | undefined;
+        if (audio) {
+          playChunk(audio);
+        }
         break;
       }
 
@@ -152,6 +213,7 @@ export function useTeamChat() {
             setMessageStreaming(id, false);
             delete currentMsgIds.current[teammate];
           }
+          delete currentSentiment.current[teammate];
           setTeammateState(teammate, "idle");
         }
         break;
@@ -167,9 +229,12 @@ export function useTeamChat() {
 
   const interrupt = useCallback(() => {
     abortRef.current?.abort();
+    stopAll(); // Stop audio playback
+    audioInitialized.current = false;
     resetAllTeammateStates();
     setIsStreaming(false);
     currentMsgIds.current = {};
+    currentSentiment.current = {};
   }, [resetAllTeammateStates, setIsStreaming]);
 
   return { sendTask, interrupt };

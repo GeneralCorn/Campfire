@@ -6,10 +6,8 @@ import { NowThinkingStrip } from "./NowThinkingStrip";
 import { ChatArea } from "./ChatArea";
 import { TaskInput } from "./TaskInput";
 import { Volume2, Radio, Users } from "lucide-react";
-import { useDemo } from "@/hooks/useDemo";
 
 export function TeamRoom() {
-  useDemo();
   const isLive = useAppStore((s) => s.isLive);
   const elapsedTime = useAppStore((s) => s.elapsedTime);
 

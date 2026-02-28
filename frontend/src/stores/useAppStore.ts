@@ -7,10 +7,6 @@ import type {
   Memory,
   SandboxEntry,
   ArtifactSection,
-  AgentId,
-  AgentState,
-  DebateMessage,
-  DebriefMessage,
 } from "@/types";
 
 interface AppState {
@@ -43,6 +39,10 @@ interface AppState {
   memories: Memory[];
   addMemory: (memory: Memory) => void;
 
+  // Session
+  currentSessionId: string;
+  setCurrentSessionId: (id: string) => void;
+
   // UI state
   rightPanelOpen: boolean;
   toggleRightPanel: () => void;
@@ -55,21 +55,6 @@ interface AppState {
   elapsedTime: number;
   setElapsedTime: (time: number) => void;
 
-  // Debate / Debrief
-  debateStatus: "idle" | "running" | "complete";
-  setDebateStatus: (s: "idle" | "running" | "complete") => void;
-  sessionId: string | null;
-  setSessionId: (id: string | null) => void;
-  agentStates: Record<AgentId, AgentState>;
-  setAgentState: (id: AgentId, patch: Partial<AgentState>) => void;
-  debateTranscript: DebateMessage[];
-  addDebateMessage: (msg: DebateMessage) => void;
-  clearDebateTranscript: () => void;
-  debriefLog: DebriefMessage[];
-  addDebriefMessage: (msg: DebriefMessage) => void;
-  clearDebriefLog: () => void;
-  selectedDebriefAgent: AgentId;
-  setSelectedDebriefAgent: (id: AgentId) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -130,33 +115,9 @@ export const useAppStore = create<AppState>((set) => ({
   addMemory: (memory) =>
     set((s) => ({ memories: [...s.memories, memory] })),
 
-  // Debate / Debrief
-  debateStatus: "idle",
-  setDebateStatus: (s) => set({ debateStatus: s }),
-  sessionId: null,
-  setSessionId: (id) => set({ sessionId: id }),
-  agentStates: {
-    scout:       { confidence: 0, sentiment: "neutral", speaking: false, thinking: false, spokenMessage: "" },
-    critic:      { confidence: 0, sentiment: "neutral", speaking: false, thinking: false, spokenMessage: "" },
-    synthesizer: { confidence: 0, sentiment: "neutral", speaking: false, thinking: false, spokenMessage: "" },
-  },
-  setAgentState: (id, patch) =>
-    set((s) => ({
-      agentStates: {
-        ...s.agentStates,
-        [id]: { ...s.agentStates[id], ...patch },
-      },
-    })),
-  debateTranscript: [],
-  addDebateMessage: (msg) =>
-    set((s) => ({ debateTranscript: [...s.debateTranscript, msg] })),
-  clearDebateTranscript: () => set({ debateTranscript: [] }),
-  debriefLog: [],
-  addDebriefMessage: (msg) =>
-    set((s) => ({ debriefLog: [...s.debriefLog, msg] })),
-  clearDebriefLog: () => set({ debriefLog: [] }),
-  selectedDebriefAgent: "scout",
-  setSelectedDebriefAgent: (id) => set({ selectedDebriefAgent: id }),
+  // Session
+  currentSessionId: "",
+  setCurrentSessionId: (id) => set({ currentSessionId: id }),
 
   // UI state
   rightPanelOpen: true,

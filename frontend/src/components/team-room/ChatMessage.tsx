@@ -49,7 +49,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       </div>
 
       <div className="min-w-0 flex-1">
-        {/* Name + timestamp */}
+        {/* Name + sentiment + timestamp */}
         <div className="flex items-baseline gap-2">
           <span
             className="text-sm font-mono font-bold uppercase tracking-[0.02em]"
@@ -57,9 +57,31 @@ export function ChatMessage({ message }: ChatMessageProps) {
           >
             {t!.name}
           </span>
+          {message.sentiment && message.sentiment !== "neutral" && (
+            <span
+              className="text-[9px] font-mono px-1.5 py-0.5 rounded-full uppercase tracking-wider"
+              style={{
+                color: t!.colorHex,
+                backgroundColor: `${t!.colorHex}15`,
+              }}
+            >
+              {message.sentiment}
+            </span>
+          )}
           <span className="text-[10px] font-mono text-text-dim">
             {formatTime(message.timestamp)}
           </span>
+          {message.confidence != null && message.confidence > 0 && (
+            <span
+              className="inline-block h-1 rounded-full"
+              style={{
+                width: `${Math.round(message.confidence * 40)}px`,
+                backgroundColor: t!.colorHex,
+                opacity: 0.4 + message.confidence * 0.6,
+              }}
+              title={`Confidence: ${Math.round(message.confidence * 100)}%`}
+            />
+          )}
         </div>
 
         {/* Content */}

@@ -1,4 +1,4 @@
-import type { Teammate } from "@/types";
+import type { Teammate, TeammateId } from "@/types";
 
 export const teammates: Record<string, Teammate> = {
   mika: {
@@ -32,3 +32,17 @@ export const teammates: Record<string, Teammate> = {
 
 export const teammateList = Object.values(teammates);
 export const teammateIds = Object.keys(teammates) as Array<keyof typeof teammates>;
+
+/** Map backend agent_id (orchestrator.py) → frontend TeammateId */
+export const AGENT_TO_TEAMMATE: Record<string, TeammateId> = {
+  scout: "mika",
+  critic: "rune",
+  synthesizer: "sage",
+};
+
+/** Map frontend TeammateId → backend agent_id */
+export const TEAMMATE_TO_AGENT: Record<TeammateId, string> = {
+  mika: "scout",
+  rune: "critic",
+  sage: "synthesizer",
+};

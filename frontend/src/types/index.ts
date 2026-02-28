@@ -1,5 +1,5 @@
 export type TeammateId = "mika" | "rune" | "sage";
-export type TeammateState = "idle" | "thinking" | "talking";
+export type TeammateState = "idle" | "thinking" | "talking" | "interrupted" | "reacting" | "agreeing";
 export type ChannelId =
   | "team-room"
   | "hangout"
@@ -51,6 +51,8 @@ export interface Message {
   thinking?: string;
   action?: { type: string; detail: string };
   artifactUpdate?: string;
+  confidence?: number;
+  sentiment?: string;
   timestamp: number;
   channel: ChannelId;
   isStreaming?: boolean;

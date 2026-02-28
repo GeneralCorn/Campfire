@@ -4,9 +4,9 @@
  * Flow per teammate turn:
  * 1. Emit { event: 'thinking', teammate }
  * 2. Call Modal agent_respond(config, history, input, mode, task)
- * 3. Emit { event: 'task_result', teammate, thinking, action, artifact_update }
- * 4. Split voice_text on sentence boundaries
- * 5. For each sentence: call ElevenLabs TTS, emit voice_chunk
+ * 3. Emit { event: 'task_result', teammate, thinking, action, artifact_update, confidence, sentiment }
+ * 4. Emit { event: 'voice_text', teammate, text } for subtitles
+ * 5. Stream TTS via ElevenLabs WebSocket, emitting { event: 'audio_chunk', teammate, audio } per packet
  * 6. Emit { event: 'turn_end', teammate }
  * 7. Check abort signal → break if interrupted
  *
@@ -14,6 +14,7 @@
  */
 
 import { NextRequest } from "next/server";
+import WebSocket from "ws";
 
 const MODAL_ENDPOINT = process.env.MODAL_ENDPOINT_URL || "";
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || "";
@@ -43,39 +44,74 @@ function decideTurnOrder(task: string, mode: string): string[] {
   return ["mika", "rune", "sage", "mika", "rune", "sage"];
 }
 
-function splitSentences(text: string): string[] {
-  // Split on sentence boundaries: . ! ? — but keep the delimiter
-  const sentences = text.match(/[^.!?—]+[.!?—]*/g) || [text];
-  return sentences.map((s) => s.trim()).filter((s) => s.length > 0);
-}
+/**
+ * Stream TTS via ElevenLabs WebSocket.
+ * Opens a WS connection, sends BOS → text → EOS, and emits audio_chunk events
+ * as PCM packets arrive. Much lower latency than REST (audio starts ~200ms in).
+ *
+ * Protocol ported from backend/orchestrator.py task_elevenlabs_streaming().
+ */
+async function streamTTS(
+  voiceId: string,
+  text: string,
+  teammateId: string,
+  emit: (data: Record<string, unknown>) => void
+): Promise<void> {
+  if (!ELEVENLABS_API_KEY || !text.trim()) return;
 
-async function callTTS(voiceId: string, text: string): Promise<string | null> {
-  if (!ELEVENLABS_API_KEY || !text.trim()) return null;
+  const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream-input?model_id=eleven_flash_v2_5&output_format=pcm_24000`;
 
-  try {
-    const res = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": ELEVENLABS_API_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text,
-          model_id: "eleven_turbo_v2_5",
-          voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-        }),
+  return new Promise<void>((resolve) => {
+    const ws = new WebSocket(wsUrl);
+
+    ws.on("open", () => {
+      // 1. BOS (Beginning of Stream)
+      ws.send(
+        JSON.stringify({
+          text: " ",
+          voice_settings: { stability: 0.5, similarity_boost: 0.8 },
+          xi_api_key: ELEVENLABS_API_KEY,
+        })
+      );
+
+      // 2. Send the full text
+      ws.send(
+        JSON.stringify({
+          text: text + " ",
+          try_trigger_generation: true,
+        })
+      );
+
+      // 3. EOS (End of Stream)
+      ws.send(JSON.stringify({ text: "" }));
+    });
+
+    ws.on("message", (raw: Buffer | string) => {
+      try {
+        const data = JSON.parse(raw.toString());
+
+        if (data.audio) {
+          emit({
+            event: "audio_chunk",
+            teammate: teammateId,
+            audio: data.audio,
+          });
+        }
+
+        if (data.isFinal) {
+          ws.close();
+        }
+      } catch {
+        // Skip malformed messages
       }
-    );
+    });
 
-    if (!res.ok) return null;
-
-    const buffer = await res.arrayBuffer();
-    return Buffer.from(buffer).toString("base64");
-  } catch {
-    return null;
-  }
+    ws.on("close", () => resolve());
+    ws.on("error", () => {
+      ws.close();
+      resolve();
+    });
+  });
 }
 
 async function callModalAgent(
@@ -156,33 +192,33 @@ export async function POST(request: NextRequest) {
         if (request.signal.aborted) break;
 
         if (result) {
-          // 3. Task result (thinking, action, artifact)
+          // 3. Task result (thinking, action, artifact, confidence, sentiment)
           emit({
             event: "task_result",
             teammate: teammateId,
             thinking: result.thinking,
             action: result.action,
             artifact_update: result.artifact_update,
+            confidence: result.confidence,
+            sentiment: result.sentiment,
           });
 
-          // 4. Voice chunks (sentence by sentence)
+          // 4. Voice text (full subtitle text emitted once)
           const voiceText = (result.voice_text as string) || (result.result as string) || "";
-          const sentences = splitSentences(voiceText);
+
+          emit({
+            event: "voice_text",
+            teammate: teammateId,
+            text: voiceText,
+          });
+
+          // 5. Stream TTS audio via ElevenLabs WebSocket
           const voiceConfig = TEAMMATE_CONFIGS[teammateId];
-
-          for (const sentence of sentences) {
-            if (request.signal.aborted) break;
-
-            const audio = await callTTS(voiceConfig.voice_id, sentence);
-            emit({
-              event: "voice_chunk",
-              teammate: teammateId,
-              text: sentence,
-              audio: audio,
-            });
+          if (voiceConfig && !request.signal.aborted) {
+            await streamTTS(voiceConfig.voice_id, voiceText, teammateId, emit);
           }
 
-          // 5. Memory node
+          // 6. Memory node
           if (result.memory) {
             emit({
               event: "memory_node",
@@ -199,7 +235,7 @@ export async function POST(request: NextRequest) {
           lastMessage = voiceText;
         }
 
-        // 6. Turn end
+        // 7. Turn end
         emit({ event: "turn_end", teammate: teammateId });
       }
 
