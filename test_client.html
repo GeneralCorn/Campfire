@@ -82,7 +82,7 @@
             ws.onopen = function () {
                 initAudioContext(); // Initialize audio context on user interaction
                 logMsg("<b>CONNECTED TO DEBATE</b>");
-                const topic = "Should we aggressively expand into the European market this quarter?";
+                const topic = "Is a hotdog considered a sandwich?";
                 logMsg("Sending Topic: " + topic);
                 ws.send(JSON.stringify({ topic: topic }));
             };

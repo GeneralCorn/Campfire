@@ -4,7 +4,35 @@ export type ChannelId =
   | "team-room"
   | "hangout"
   | "sandbox"
-  | "memories";
+  | "memories"
+  | "debate"
+  | "debrief";
+
+export type AgentId = "scout" | "critic" | "synthesizer";
+
+export interface AgentState {
+  confidence: number;
+  sentiment: string;
+  speaking: boolean;
+  thinking: boolean;
+  spokenMessage: string;
+}
+
+export interface DebateMessage {
+  id: string;
+  agentId: AgentId | "system";
+  content: string;
+  timestamp: number;
+}
+
+export interface DebriefMessage {
+  id: string;
+  role: "user" | AgentId;
+  content: string;
+  timestamp: number;
+  confidence?: number;
+  sentiment?: string;
+}
 
 export interface Teammate {
   id: TeammateId;

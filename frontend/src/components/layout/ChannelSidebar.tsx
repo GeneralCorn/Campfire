@@ -48,6 +48,7 @@ export function ChannelSidebar() {
   const setActiveChannel = useAppStore((s) => s.setActiveChannel);
   const isLive = useAppStore((s) => s.isLive);
   const memories = useAppStore((s) => s.memories);
+  const debateStatus = useAppStore((s) => s.debateStatus);
 
   const grouped = channels.reduce(
     (acc, ch) => {
@@ -92,29 +93,32 @@ export function ChannelSidebar() {
 
             {chs.map((ch) => {
               const isActive = activeChannel === ch.id;
-              const Icon = ch.type === "voice" ? (ch.id === "hangout" ? Headphones : Volume2) : Hash;
+              const isLocked = ch.id === "debrief" && debateStatus !== "complete";
+              const Icon = ch.type === "voice" ? (ch.id === "hangout" || ch.id === "debrief" ? Headphones : Volume2) : Hash;
 
               return (
                 <div key={ch.id}>
                   <button
-                    onClick={() => setActiveChannel(ch.id as ChannelId)}
-                    className={`flex w-full items-center gap-2 px-2 py-1 rounded text-sm cursor-pointer transition-colors ${
-                      isActive
-                        ? "bg-white/[0.04] text-text-primary border-l-2 border-broadcast"
-                        : "text-text-secondary hover:bg-white/[0.03] hover:text-text-primary border-l-2 border-transparent"
+                    onClick={() => !isLocked && setActiveChannel(ch.id as ChannelId)}
+                    disabled={isLocked}
+                    className={`flex w-full items-center gap-2 px-2 py-1 rounded text-sm transition-colors ${
+                      isLocked
+                        ? "text-text-dim cursor-not-allowed opacity-40 border-l-2 border-transparent"
+                        : isActive
+                        ? "bg-white/[0.04] text-text-primary cursor-pointer border-l-2 border-broadcast"
+                        : "text-text-secondary hover:bg-white/[0.03] hover:text-text-primary cursor-pointer border-l-2 border-transparent"
                     }`}
                   >
                     <Icon size={16} className={isActive ? "text-text-primary" : "text-text-dim"} />
                     <span>{ch.name}</span>
                     {ch.id === "team-room" && isLive && (
-                      <span className="ml-auto text-[9px] font-mono font-bold text-live">
-                        LIVE
-                      </span>
+                      <span className="ml-auto text-[9px] font-mono font-bold text-live">LIVE</span>
                     )}
-                    {ch.id === "team-room" && !isLive && (
-                      <span className="ml-auto text-[9px] font-mono text-text-dim">
-
-                      </span>
+                    {ch.id === "debate" && debateStatus === "running" && (
+                      <span className="ml-auto text-[9px] font-mono font-bold text-danger">LIVE</span>
+                    )}
+                    {ch.id === "debrief" && isLocked && (
+                      <span className="ml-auto text-[9px] font-mono text-text-dim">🔒</span>
                     )}
                   </button>
 

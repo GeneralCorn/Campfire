@@ -7,11 +7,13 @@ import base64
 from typing import Dict, Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import httpx
 import websockets
+from deepgram import DeepgramClient
 
 load_dotenv()
 
@@ -26,21 +28,21 @@ MODEL_NAME = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # APIs
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "your_elevenlabs_key_here")
 SUPERMEMORY_API_KEY = os.getenv("SUPERMEMORY_API_KEY", "your_supermemory_key_here")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your_openai_key_here")
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "your_deepgram_key_here")
 
 # Agent Configs
 AGENTS = {
     "scout": {
         "voice_id": "21m00Tcm4TlvDq8ikWAM", # Rachel / Standard female voice
-        "system_prompt": "You are the Scout. Your job is to enthusiastically propose bold new ideas and advocate for the given topic. Be persuasive and forward-looking.",
+        "system_prompt": "You are the Scout. Actively pitch bold, out-of-the-box ideas. Be enthusiastic, informal, and extremely concise. Speak like a real human in a casual meeting.",
     },
     "critic": {
         "voice_id": "onwK4e9ZLuTAKqWW03F9", # Default male / British often
-        "system_prompt": "You are the Critic. Your job is to poke holes in the Scout's proposal. Point out risks, downsides, and hidden costs to the topic debated. Be analytical and slightly skeptical, but not mean.",
+        "system_prompt": "You are the Critic. Poke holes in the Scout's idea immediately. Be sharp, direct, and slightly cynical. Speak informally like a real human. Do not be overly polite.",
     },
     "synthesizer": {
         "voice_id": "nPczCjzI2devNBz1zQrb", # Calm / authoritative
-        "system_prompt": "You are the Synthesizer. You have heard the Scout's proposal and the Critic's concerns. Your job is to weigh both sides objectively and provide a final, balanced executive decision. Be authoritative, clear, and wise.",
+        "system_prompt": "You are the Synthesizer. You have heard the Scout and Critic. Deliver a final, punchy executive decision. Be authoritative, brief, and decisive.",
     }
 }
 
@@ -103,10 +105,28 @@ def parse_llm_response(raw_text: str) -> dict:
         spoken_message = re.sub(r'^\s*[-*]\s+', '', spoken_message, flags=re.MULTILINE)
         
     except json.JSONDecodeError:
-        print(f"[Warning] Failed to parse JSON. Falling back to raw text. Text: {message_json_text}")
-        spoken_message = message_json_text  # Fallback: Just read whatever it said
-        
-        # Clean up fallback text as well
+        print(f"[Warning] Failed to parse JSON. Trying markdown key-value fallback. Text: {message_json_text}")
+
+        # Try parsing markdown key-value format DeepSeek sometimes outputs instead of JSON
+        spoken_match = re.search(r'\*{0,2}spoken_message\*{0,2}[:\s]+(.*?)(?=\n\*{0,2}confidence|\Z)',
+                                  message_json_text, re.DOTALL | re.IGNORECASE)
+        if spoken_match:
+            spoken_message = spoken_match.group(1).strip().strip('"')
+
+        conf_match = re.search(r'confidence[:\s]+([\d.]+)', message_json_text, re.IGNORECASE)
+        if conf_match:
+            confidence = float(conf_match.group(1))
+
+        sent_match = re.search(r'sentiment[:\s]+(\w+)', message_json_text, re.IGNORECASE)
+        if sent_match:
+            sentiment = sent_match.group(1).strip()
+
+        # Final fallback: use raw text if markdown parse also found nothing
+        if not spoken_message:
+            print(f"[Warning] Markdown fallback also failed. Using raw text.")
+            spoken_message = message_json_text
+
+        # Clean up
         spoken_message = re.sub(r'[*_#`~]', '', spoken_message)
 
     return {
@@ -131,8 +151,8 @@ async def call_modal_llm(agent_id: str, topic: str, conversation_history: str) -
         "CRITICAL RULES:\n"
         "1. You MUST wrap your entire internal reasoning process in <think>...</think> tags FIRST.\n"
         "2. Immediately after the closing </think> tag, you MUST output a valid JSON object matching this exact schema: "
-        '{"spoken_message": "2-3 sentences max", "confidence": 0.9, "sentiment": "analytical"}\n'
-        "3. The 'spoken_message' MUST NOT contain any markdown, asterisks, or bullet points. Output raw spoken English only."
+        '{"spoken_message": "Exactly 1 or 2 sentences MAX. Be extremely crisp.", "confidence": 0.9, "sentiment": "analytical"}\n'
+        "3. The 'spoken_message' MUST NOT contain any markdown, asterisks, or bullet points. Output natural spoken English only. NO yapping."
     )
     
     system_prompt = f"{agent_config['system_prompt']}\n\n{formatting_rules}"
@@ -214,6 +234,8 @@ CRITICAL RULES:
 
 
 async def query_debrief_memory(session_id: str, target_agent: str, question: str) -> str:
+    # Supermemory needs a moment to index newly written documents
+    await asyncio.sleep(2)
     url = "https://api.supermemory.ai/v4/search"
     headers = {
         "Authorization": f"Bearer {SUPERMEMORY_API_KEY}",
@@ -228,16 +250,18 @@ async def query_debrief_memory(session_id: str, target_agent: str, question: str
         
     payload = {
         "q": question,
-        "containerTags": [f"{session_id}"], 
+        "containerTag": f"session_{session_id}",
         "limit": 5,
         "rerank": True
     }
-    if filters:
-        payload["filters"] = filters
+
+    print(f"[DEBRIEF SEARCH] Full payload being sent: {json.dumps(payload, indent=2)}")
 
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.post(url, headers=headers, json=payload, timeout=30.0)
+            print(f"[DEBRIEF SEARCH] Response status: {resp.status_code}")
+            print(f"[DEBRIEF SEARCH] Response body: {resp.text}")
             resp.raise_for_status()
             data = resp.json()
             
@@ -247,10 +271,10 @@ async def query_debrief_memory(session_id: str, target_agent: str, question: str
                 
             context_blocks = []
             for r in results:
-                metadata = r.get("metadata", {})
+                metadata = r.get("metadata") or {}
                 turn_num = metadata.get("turn_number", "?")
                 ag_id = metadata.get("agent_id", "unknown")
-                content = r.get("content", "")
+                content = r.get("memory", "")  # v4 returns "memory" not "content"
                 context_blocks.append(f"[Turn {turn_num} - {ag_id.upper()}]\n{content}")
                 
             return "\n\n".join(context_blocks)
@@ -280,7 +304,7 @@ async def task_supermemory_logging(agent_id: str, turn_number: int, session_id: 
     
     payload = {
         "content": content,
-        "containerTags": [f"{session_id}"], # As requested: flat list containing the session ID
+        "containerTags": [f"session_{session_id}"], # Ensure 'session_' prefix is used reliably
         "metadata": {
             "agent_id": agent_id,
             "turn_number": turn_number
@@ -292,6 +316,7 @@ async def task_supermemory_logging(agent_id: str, turn_number: int, session_id: 
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             print(f"  [Supermemory] Successfully queued {agent_id} memory! (Status: {response.status_code})")
+            print(f"[SUPERMEMORY] Logged turn for {agent_id}, session {session_id}")
     except Exception as e:
         print(f"  [Supermemory] ERROR failed to log memory: {e}")
         try:
@@ -393,6 +418,7 @@ async def websocket_debate_endpoint(websocket: WebSocket):
         })
         
         conversation_history = ""
+        background_tasks = set() # Keep strong references to background logging tasks
         
         # 3-Turn Sequential Debate Loop (Scout -> Critic -> Synthesizer)
         for turn_index, agent_id in enumerate(ORDER_OF_AGENTS):
@@ -440,9 +466,11 @@ async def websocket_debate_endpoint(websocket: WebSocket):
             print("  [Orchestrator] Forking tasks: T1 (Supermemory Background) | T2 (ElevenLabs Stream)")
             
             # Task B: Background Memory Logging (Fire and forget, don't await)
-            asyncio.create_task(
+            bg_task = asyncio.create_task(
                 task_supermemory_logging(agent_id, turn_number, session_id, reasoning, spoken_message)
             )
+            background_tasks.add(bg_task)
+            bg_task.add_done_callback(background_tasks.discard)
             
             # Task A: Await the ElevenLabs Audio Stream (Blocks until agent finishes speaking)
             await task_elevenlabs_streaming(websocket, agent_id, spoken_message)
@@ -459,7 +487,13 @@ async def websocket_debate_endpoint(websocket: WebSocket):
             "type": "system",
             "message": "Debate concluded."
         })
-        
+
+        # Wait for all Supermemory writes to finish before closing
+        if background_tasks:
+            print(f"[Orchestrator] Waiting for {len(background_tasks)} Supermemory writes to complete...")
+            await asyncio.gather(*background_tasks, return_exceptions=True)
+            print(f"[Orchestrator] All memory writes confirmed.")
+
         await websocket.close()
 
     except WebSocketDisconnect:
@@ -477,26 +511,33 @@ async def websocket_debate_endpoint(websocket: WebSocket):
 
 @app.post("/api/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
-    if not OPENAI_API_KEY or OPENAI_API_KEY == "your_openai_key_here":
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured.")
+    if not DEEPGRAM_API_KEY or DEEPGRAM_API_KEY == "your_deepgram_key_here":
+        raise HTTPException(status_code=500, detail="DEEPGRAM_API_KEY is not configured.")
         
-    url = "https://api.openai.com/v1/audio/transcriptions"
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+    deepgram = DeepgramClient(DEEPGRAM_API_KEY)
+    audio_bytes = await file.read()
     
-    file_content = await file.read()
-    files = {"file": (file.filename or "audio.webm", file_content, file.content_type or "audio/webm")}
-    data = {"model": "whisper-1"}
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.post(url, headers=headers, data=data, files=files, timeout=60.0)
-            resp.raise_for_status()
-            return {"transcript": resp.json().get("text", "")}
-        except Exception as e:
-            err = str(e)
-            if hasattr(e, 'response') and e.response:
-                err += f" - {e.response.text}"
-            return {"error": f"Transcription failed: {err}"}
+    try:
+        response = await deepgram.listen.asyncprerecorded.v("1").transcribe_file(
+            {"buffer": audio_bytes, "mimetype": "audio/webm"},
+            {
+                "model": "nova-2",
+                "language": "en", 
+                "smart_format": True,
+                "punctuate": True,
+                "filler_words": False,
+            }
+        )
+        
+        transcript = response.results.channels[0].alternatives[0].transcript
+        
+        if not transcript.strip():
+            return JSONResponse(status_code=400, content={"error": "No speech detected"})
+            
+        return {"transcript": transcript}
+        
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Transcription failed: {str(e)}"})
 
 @app.websocket("/ws/debrief/{session_id}")
 async def websocket_debrief_endpoint(websocket: WebSocket, session_id: str):
@@ -579,7 +620,19 @@ async def websocket_debrief_endpoint(websocket: WebSocket, session_id: str):
             pass
 
 
-# To run this file directly for simple tests: 
+@app.get("/api/debug/memories/{session_id}")
+async def debug_memories(session_id: str):
+    url = "https://api.supermemory.ai/v3/documents/list"
+    headers = {
+        "Authorization": f"Bearer {SUPERMEMORY_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, headers=headers)
+        return resp.json()
+
+
+# To run this file directly for simple tests:
 # uvicorn orchestrator:app --reload --port 8001
 if __name__ == "__main__":
     import uvicorn

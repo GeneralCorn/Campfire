@@ -225,7 +225,7 @@ async def main():
         
     # 4. Wait for indexing
     print("\nWaiting 7 seconds for Supermemory to index the new document...")
-    await asyncio.sleep(7)
+    await asyncio.sleep(20)
     
     # 5. Query Supermemory
     try:

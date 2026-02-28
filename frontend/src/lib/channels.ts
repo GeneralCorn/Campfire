@@ -24,6 +24,20 @@ export const channels: Channel[] = [
     description: "Voice chat — interrogate any agent about its decisions",
   },
   {
+    id: "debate",
+    name: "debate-room",
+    type: "voice",
+    section: "DEBATE",
+    description: "Watch Scout, Critic and Synthesizer argue it out",
+  },
+  {
+    id: "debrief",
+    name: "debrief-room",
+    type: "voice",
+    section: "DEBATE",
+    description: "Interrogate any agent after the debate",
+  },
+  {
     id: "sandbox",
     name: "sandbox",
     type: "text",

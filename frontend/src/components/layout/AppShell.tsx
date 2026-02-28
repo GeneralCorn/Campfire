@@ -9,6 +9,8 @@ import { TeamRoom } from "@/components/team-room/TeamRoom";
 import { HangoutView } from "@/components/hangout/HangoutView";
 import { SandboxView } from "@/components/sandbox/SandboxView";
 import { MemoriesView } from "@/components/memories/MemoriesView";
+import { DebateRoom } from "@/components/debate/DebateRoom";
+import { DebriefRoom } from "@/components/debate/DebriefRoom";
 
 function MainContent() {
   const activeChannel = useAppStore((s) => s.activeChannel);
@@ -18,6 +20,10 @@ function MainContent() {
       return <TeamRoom />;
     case "hangout":
       return <HangoutView />;
+    case "debate":
+      return <DebateRoom />;
+    case "debrief":
+      return <DebriefRoom />;
     case "sandbox":
       return <SandboxView />;
     case "memories":
