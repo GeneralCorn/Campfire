@@ -3,3 +3,7 @@ supermemory>=0.1.0
 elevenlabs>=1.0.0
 httpx>=0.27.0
 fastapi[standard]>=0.115.0
+websockets>=12.0
+python-dotenv>=1.0.0
+openai>=1.0.0
+python-multipart>=0.0.9

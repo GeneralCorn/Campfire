@@ -1,8 +1,8 @@
 """
-AgentFM Modal Backend — Single agent_respond function.
+Campfire Modal Backend — vLLM-powered agent responses.
 
-One function, any teammate. Pass a config dict, get a response.
-Modal auto-scales containers: 3 agents = 3 containers, 10 = 10.
+Follows orchestrator.py: httpx POST to Modal-hosted vLLM, parse <think> + JSON.
+One function, any teammate. Modal auto-scales containers.
 """
 
 import json
@@ -13,32 +13,79 @@ import modal
 app = modal.App("agentfm")
 
 image = modal.Image.debian_slim(python_version="3.11").pip_install(
-    "anthropic",
-    "supermemory",
     "httpx",
+    "supermemory",
 )
 
 
-def parse_json_response(text: str) -> dict:
-    """Parse JSON from LLM response, handling markdown fences."""
-    text = re.sub(r"```json\s*", "", text)
-    text = re.sub(r"```\s*$", "", text)
+# Formatting rules — ported from orchestrator.py
+FORMATTING_RULES = (
+    "CRITICAL RULES:\n"
+    "1. You MUST wrap your entire internal reasoning process in <think>...</think> tags FIRST.\n"
+    "2. Immediately after the closing </think> tag, you MUST output a valid JSON object matching this exact schema: "
+    '{"spoken_message": "2-3 sentences max", "confidence": 0.9, "sentiment": "analytical"}\n'
+    "3. The 'spoken_message' MUST NOT contain any markdown, asterisks, or bullet points. Output raw spoken English only."
+)
+
+
+def parse_llm_response(raw_text: str) -> dict:
+    """
+    Extracts reasoning from <think> tags and parses remaining text as JSON.
+    Ported from orchestrator.py parse_llm_response().
+    """
+    reasoning = ""
+    message_json_text = raw_text
+
+    # 1. Extract <think> reasoning
+    think_match = re.search(r'<think>(.*?)</think>', raw_text, flags=re.DOTALL)
+    if think_match:
+        reasoning = think_match.group(1).strip()
+        message_json_text = raw_text.replace(think_match.group(0), "").strip()
+    elif '</think>' in raw_text:
+        parts = raw_text.split('</think>')
+        reasoning = parts[0].replace('<think>', '').strip()
+        message_json_text = parts[1].strip()
+
+    # 2. Extract JSON (remove markdown codeblocks)
+    json_match = re.search(
+        r'```json\s*(.*?)\s*```', message_json_text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if json_match:
+        message_json_text = json_match.group(1).strip()
+    message_json_text = message_json_text.strip('`').strip()
+
+    # 3. Parse JSON
+    spoken_message = ""
+    confidence = 0.5
+    sentiment = "neutral"
+
     try:
-        return json.loads(text.strip())
+        parsed = json.loads(message_json_text)
+        spoken_message = parsed.get("spoken_message", "")
+        confidence = float(parsed.get("confidence", 0.5))
+        sentiment = parsed.get("sentiment", "neutral")
+
+        # Clean up markdown artifacts
+        spoken_message = re.sub(r'[*_#`~]', '', spoken_message)
+        spoken_message = re.sub(r'^\s*[-*]\s+', '', spoken_message, flags=re.MULTILINE)
+
     except json.JSONDecodeError:
-        return {
-            "thinking": "",
-            "result": text.strip(),
-            "action": {"type": "none", "detail": ""},
-            "artifact_update": None,
-            "memory": None,
-            "voice_text": text.strip()[:200],
-        }
+        print(f"[Warning] Failed to parse JSON. Falling back to raw text. Text: {message_json_text}")
+        spoken_message = message_json_text
+        spoken_message = re.sub(r'[*_#`~]', '', spoken_message)
+
+    return {
+        "reasoning": reasoning,
+        "spoken_message": spoken_message,
+        "confidence": confidence,
+        "sentiment": sentiment,
+    }
 
 
 @app.function(
     image=image,
-    secrets=[modal.Secret.from_name("agentfm-secrets")],
+    secrets=[modal.Secret.from_name("campfire-secrets")],
     timeout=120,
 )
 async def agent_respond(
@@ -49,17 +96,15 @@ async def agent_respond(
     task: str = "",
 ) -> dict:
     """
-    Combined Task Agent + Voice Agent in one container call.
-
-    1. Task Agent (Sonnet) — does the actual work
-    2. Voice Agent (Haiku) — distills to 2-3 spoken sentences
-    3. Stores memory if result has one
-    4. Returns { thinking, result, action, artifact_update, memory, voice_text }
+    Single LLM call per turn via Modal-hosted vLLM.
+    Pattern from orchestrator.py: httpx POST -> vLLM -> parse <think> + JSON.
     """
-    from anthropic import Anthropic
+    import httpx
     from memory import MemoryManager
 
-    llm = Anthropic()
+    modal_url = os.environ.get("MODAL_URL", "")
+    model_name = os.environ.get("MODEL_NAME", "")
+
     mem = MemoryManager()
 
     # --- Get memory context ---
@@ -78,79 +123,63 @@ async def agent_respond(
             )
         memory_block = "\n\n".join(parts)
 
-    # --- Build task agent prompt ---
+    # --- Build system prompt ---
     task_block = f"\nCURRENT TASK: {task}" if task else ""
     mode_instruction = {
         "task": "You're working on a task with your team. Stay focused, be collaborative.",
         "chat": "You're hanging out. Be yourself. Reference past work if relevant.",
     }.get(mode, "")
 
-    system = f"""{config['system_prompt']}
+    system_prompt = f"""{config['system_prompt']}
 
 {mode_instruction}
 {task_block}
 
 {memory_block}
 
-Respond with JSON (no markdown fences):
-{{
-  "thinking": "Your internal thought process (1-2 sentences)",
-  "result": "Your main finding or response content",
-  "action": {{ "type": "search|review|flag|write|none", "detail": "what you did" }},
-  "artifact_update": "If you're writing/updating a document section, put it here. Otherwise null.",
-  "memory": "Key fact to remember for later (or null if nothing worth storing)"
-}}"""
+{FORMATTING_RULES}"""
 
-    # --- Task Agent call (Sonnet — the heavy lift) ---
-    task_response = llm.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1024,
-        system=system,
-        messages=[
+    # --- Call vLLM on Modal (OpenAI-compatible endpoint) ---
+    url = f"{modal_url}/v1/chat/completions"
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
             *conversation_history,
             {"role": "user", "content": current_input},
         ],
-    )
+        "temperature": 0.7,
+        "max_tokens": 2048,
+    }
 
-    task_result = parse_json_response(task_response.content[0].text)
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        raw_text = data["choices"][0]["message"]["content"]
 
-    # --- Voice Agent call (Haiku — lightweight distillation) ---
-    voice_prompt = f"""{config.get('voice_personality', 'Summarize in 2-3 casual spoken sentences.')}
+    parsed = parse_llm_response(raw_text)
 
-Finding to rephrase:
-{task_result.get('result', '')}"""
-
-    voice_response = llm.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=150,
-        messages=[{"role": "user", "content": voice_prompt}],
-    )
-
-    voice_text = voice_response.content[0].text.strip()
-
-    # --- Store memory if present ---
-    memory_content = task_result.get("memory")
-    if memory_content:
-        mem.add_memory(config["supermemory_tag"], memory_content)
-
-    # Log to shared context
+    # --- Store shared context ---
     mem.add_shared(
-        f"[{config['name']}] said: {voice_text[:200]}"
+        f"[{config['name']}] said: {parsed['spoken_message'][:200]}"
     )
 
     return {
-        "thinking": task_result.get("thinking", ""),
-        "result": task_result.get("result", ""),
-        "action": task_result.get("action", {"type": "none", "detail": ""}),
-        "artifact_update": task_result.get("artifact_update"),
-        "memory": memory_content,
-        "voice_text": voice_text,
+        "thinking": parsed["reasoning"],
+        "result": parsed["spoken_message"],
+        "action": {"type": "none", "detail": ""},
+        "artifact_update": None,
+        "memory": None,
+        "voice_text": parsed["spoken_message"],
+        "confidence": parsed["confidence"],
+        "sentiment": parsed["sentiment"],
     }
 
 
 @app.function(
     image=image,
-    secrets=[modal.Secret.from_name("agentfm-secrets")],
+    secrets=[modal.Secret.from_name("campfire-secrets")],
 )
 async def get_memories(teammate_tag: str = None) -> list:
     """Fetch memories for the memories view."""
@@ -163,3 +192,27 @@ async def get_memories(teammate_tag: str = None) -> list:
         results = mem.search("*", teammate_tag=tag, limit=20)
         all_memories.extend(results)
     return all_memories
+
+
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name("campfire-secrets")],
+    timeout=120,
+)
+@modal.web_endpoint(method="POST")
+async def serve(body: dict):
+    """Web endpoint called by the Next.js frontend API routes."""
+    from config import TEAMMATE_CONFIGS
+
+    config_id = body.get("config_id", "mika")
+    config = TEAMMATE_CONFIGS.get(config_id)
+    if not config:
+        return {"error": f"Unknown config_id: {config_id}"}
+
+    return await agent_respond.local(
+        config=config,
+        conversation_history=body.get("conversation_history", []),
+        current_input=body.get("current_input", ""),
+        mode=body.get("mode", "task"),
+        task=body.get("task", ""),
+    )

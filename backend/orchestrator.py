@@ -15,20 +15,28 @@ import httpx
 import websockets
 from deepgram import DeepgramClient
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env.local"))
 
 # ==============================================================================
 # Configuration
 # ==============================================================================
 
-# LLM 
-MODAL_URL = "https://saibilla21--agentfm-brain-serve-dev.modal.run"
-MODEL_NAME = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+# LLM
+MODEL_NAME = os.getenv("MODEL_NAME")
+MODAL_URL = os.getenv("MODAL_URL")
 
 # APIs
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "your_elevenlabs_key_here")
-SUPERMEMORY_API_KEY = os.getenv("SUPERMEMORY_API_KEY", "your_supermemory_key_here")
-DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "your_deepgram_key_here")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+SUPERMEMORY_API_KEY = os.getenv("SUPERMEMORY_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
+
+# ElevenLabs TTS Config
+ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
+ELEVENLABS_OUTPUT_FORMAT = os.getenv("ELEVENLABS_OUTPUT_FORMAT", "pcm_24000")
+
+# Server
+ORCHESTRATOR_PORT = int(os.getenv("ORCHESTRATOR_PORT", "8001"))
 
 # Agent Configs
 AGENTS = {
@@ -330,7 +338,7 @@ async def task_elevenlabs_streaming(websocket: WebSocket, agent_id: str, spoken_
     Task A: Streams the synthesized speech from ElevenLabs directly down the FastAPI WebSocket.
     """
     voice_id = AGENTS[agent_id]["voice_id"]
-    elevenlabs_ws_url = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input?model_id=eleven_flash_v2_5&output_format=pcm_24000"
+    elevenlabs_ws_url = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input?model_id={ELEVENLABS_MODEL_ID}&output_format={ELEVENLABS_OUTPUT_FORMAT}"
     
     print(f"  [ElevenLabs] Connecting to Voice ID: {voice_id} for {agent_id}...")
     
@@ -511,7 +519,7 @@ async def websocket_debate_endpoint(websocket: WebSocket):
 
 @app.post("/api/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
-    if not DEEPGRAM_API_KEY or DEEPGRAM_API_KEY == "your_deepgram_key_here":
+    if not DEEPGRAM_API_KEY:
         raise HTTPException(status_code=500, detail="DEEPGRAM_API_KEY is not configured.")
         
     deepgram = DeepgramClient(DEEPGRAM_API_KEY)
@@ -636,4 +644,4 @@ async def debug_memories(session_id: str):
 # uvicorn orchestrator:app --reload --port 8001
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("orchestrator:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("orchestrator:app", host="0.0.0.0", port=ORCHESTRATOR_PORT, reload=True)

@@ -6,12 +6,12 @@ import uuid
 import re
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from backend/.env.local
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env.local"))
 
 SUPERMEMORY_API_KEY = os.getenv("SUPERMEMORY_API_KEY", "your_supermemory_api_key_here")
-MODAL_URL = "https://saibilla21--agentfm-brain-serve-dev.modal.run"
-MODEL_NAME = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+MODAL_URL = os.getenv("MODAL_URL", "https://saibilla21--agentfm-brain-serve-dev.modal.run")
+MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
 
 async def call_llm(prompt: str) -> str:
     """

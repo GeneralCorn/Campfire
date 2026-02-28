@@ -73,3 +73,52 @@ class MemoryManager:
             ]
         except Exception:
             return []
+
+    def search_session(self, session_id: str, agent_tag: str, query: str, limit: int = 5) -> str:
+        """
+        Search memories scoped to a specific session for debrief mode.
+        Uses containerTags to filter by session and metadata to filter by agent.
+        Pattern from orchestrator.py query_debrief_memory().
+        """
+        import httpx
+
+        url = "https://api.supermemory.ai/v4/search"
+        api_key = os.environ.get("SUPERMEMORY_API_KEY", "")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload: dict = {
+            "q": query,
+            "containerTags": [session_id],
+            "limit": limit,
+            "rerank": True,
+        }
+
+        if agent_tag and agent_tag != "all":
+            payload["filters"] = {
+                "AND": [{"key": "agent_id", "value": agent_tag}]
+            }
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+
+                results = data.get("results", [])
+                if not results:
+                    return ""
+
+                blocks = []
+                for r in results:
+                    metadata = r.get("metadata", {})
+                    turn_num = metadata.get("turn_number", "?")
+                    ag_id = metadata.get("agent_id", "unknown")
+                    content = r.get("content", "")
+                    blocks.append(f"[Turn {turn_num} - {ag_id.upper()}]\n{content}")
+
+                return "\n\n".join(blocks)
+        except Exception:
+            return ""

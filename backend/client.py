@@ -1,9 +1,12 @@
+import os
 import re
+from dotenv import load_dotenv
 from openai import OpenAI
 
-# Paste your Modal deployment URL here after running: modal deploy modal_poc.py
-MODAL_URL = "https://saibilla21--agentfm-brain-serve-dev.modal.run"
-MODEL_NAME = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env.local"))
+
+MODAL_URL = os.getenv("MODAL_URL", "https://saibilla21--agentfm-brain-serve-dev.modal.run")
+MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
 
 
 def parse_deepseek_output(raw_text: str) -> dict:
