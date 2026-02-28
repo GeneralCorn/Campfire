@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>AgentFM Test Client</title>
+</head>
+
+<body>
+    <h1>AgentFM Test Client</h1>
+
+    <!-- DEBATE SECTION -->
+    <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 20px; background-color: #f9f9f9;">
+        <h2>1. Live Debate</h2>
+        <button onclick="startDebate()" style="padding: 10px; font-weight: bold;">Start Debate</button>
+    </div>
+
+    <!-- DEBRIEF SECTION -->
+    <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 20px; background-color: #f0f8ff;">
+        <h2>2. Debrief Room (Q&A)</h2>
+        <p><i>Wait for a debate to start to get a Session ID, then connect to the Debrief Room.</i></p>
+
+        <label><b>Session ID:</b></label>
+        <input type="text" id="sessionIdInput" placeholder="Session ID will auto-fill" style="width: 300px;"><br><br>
+
+        <button onclick="connectDebrief()" style="padding: 10px; font-weight: bold; background-color: #d1ecf1;">Connect
+            to Debrief Room</button>
+        <br><br>
+        <hr><br>
+
+        <label><b>Target Agent:</b></label>
+        <select id="targetAgent" style="padding: 5px;">
+            <option value="scout">Scout</option>
+            <option value="critic">Critic</option>
+            <option value="synthesizer">Synthesizer</option>
+            <option value="all">All</option>
+        </select><br><br>
+
+        <label><b>Ask via Text:</b></label>
+        <input type="text" id="textQuestion" placeholder="Why did you recommend Europe?"
+            style="width: 300px; padding: 5px;">
+        <button onclick="sendTextQuestion()" style="padding: 5px;">Ask Text</button><br><br>
+
+        <label><b>Ask via Voice:</b></label>
+        <button id="recordBtn" onclick="toggleRecording()" style="padding: 5px; background-color: #f8d7da;">🎤 Start
+            Recording</button>
+        <span id="recordStatus" style="color: red; display: none; font-weight: bold;">Recording...</span>
+    </div>
+
+    <div id="log"
+        style="white-space: pre-wrap; font-family: monospace; border: 1px solid #ccc; padding: 10px; margin-top: 10px; height: 400px; overflow-y: scroll; background-color: #fff;">
+    </div>
+
+    <script>
+        let ws;
+        let debriefWs;
+        let currentSessionId = "";
+
+        let audioContext;
+        let nextPlayTime = 0;
+
+        let mediaRecorder;
+        let audioChunks = [];
+
+        function initAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 24000 // Must match the PCM sample rate from ElevenLabs
+                });
+            }
+        }
+
+        function logMsg(msg) {
+            const div = document.getElementById("log");
+            div.innerHTML += msg + "\n";
+            div.scrollTop = div.scrollHeight;
+        }
+
+        function startDebate() {
+            if (ws) ws.close();
+            ws = new WebSocket("ws://localhost:8001/ws/debate");
+
+            ws.onopen = function () {
+                initAudioContext(); // Initialize audio context on user interaction
+                logMsg("<b>CONNECTED TO DEBATE</b>");
+                const topic = "Should we aggressively expand into the European market this quarter?";
+                logMsg("Sending Topic: " + topic);
+                ws.send(JSON.stringify({ topic: topic }));
+            };
+
+            ws.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+
+                if (data.type === "system") {
+                    logMsg("<span style='color: blue'>[SYSTEM] " + data.message + "</span>");
+                    if (data.session_id) {
+                        currentSessionId = data.session_id;
+                        document.getElementById("sessionIdInput").value = currentSessionId;
+                    }
+                } else if (data.type === "agent_thinking") {
+                    logMsg("<i>[" + data.agent_id.toUpperCase() + "] is thinking (Turn " + data.turn + ")...</i>");
+                } else if (data.type === "agent_metadata") {
+                    logMsg("<b>[" + data.agent_id.toUpperCase() + "] Speeches:</b>");
+                    logMsg("  Message: " + data.spoken_message);
+                    logMsg("  Confidence: " + data.confidence + " | Sentiment: " + data.sentiment);
+                } else if (data.type === "audio_chunk") {
+                    const div = document.getElementById("log");
+                    div.innerHTML += ".";
+
+                    const binaryString = atob(data.audio_b64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    const pcm16 = new Int16Array(bytes.buffer);
+                    const float32Data = new Float32Array(pcm16.length);
+                    for (let i = 0; i < pcm16.length; i++) {
+                        float32Data[i] = pcm16[i] / 32768.0;
+                    }
+                    playPCMChunk(float32Data);
+                } else if (data.type === "error") {
+                    logMsg("<span style='color: red'>[ERROR] " + data.message + "</span>");
+                } else {
+                    logMsg("[UNKNOWN] " + event.data);
+                }
+            };
+
+            ws.onerror = function (err) {
+                logMsg("<span style='color: red'>Debate WebSocket Error</span>");
+            };
+
+            ws.onclose = function () {
+                logMsg("<b>DEBATE DISCONNECTED</b>");
+            };
+        }
+
+        function connectDebrief() {
+            if (debriefWs) debriefWs.close();
+            const sid = document.getElementById("sessionIdInput").value.trim();
+            if (!sid) {
+                alert("Need a session ID first! Start a debate.");
+                return;
+            }
+
+            debriefWs = new WebSocket("ws://localhost:8001/ws/debrief/" + sid);
+
+            debriefWs.onopen = function () {
+                initAudioContext();
+                logMsg("<b><span style='color: green'>[DEBRIEF] CONNECTED</span></b>");
+            };
+
+            debriefWs.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+
+                if (data.type === "ready") {
+                    logMsg("<span style='color: green'>[DEBRIEF] Session " + data.session_id + " ready for questions!</span>");
+                } else if (data.type === "agent_thinking") {
+                    logMsg("<i>[DEBRIEF] [" + data.agent_id.toUpperCase() + "] " + data.message + "</i>");
+                } else if (data.type === "agent_metadata") {
+                    logMsg("<b>[DEBRIEF] [" + data.agent_id.toUpperCase() + "] Answering:</b>");
+                    logMsg("  Confidence: " + data.confidence + " | Sentiment: " + data.sentiment);
+                } else if (data.type === "audio_chunk") {
+                    const div = document.getElementById("log");
+                    div.innerHTML += ".";
+
+                    const binaryString = atob(data.audio_b64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    const pcm16 = new Int16Array(bytes.buffer);
+                    const float32Data = new Float32Array(pcm16.length);
+                    for (let i = 0; i < pcm16.length; i++) {
+                        float32Data[i] = pcm16[i] / 32768.0;
+                    }
+                    playPCMChunk(float32Data);
+                } else if (data.type === "debrief_complete") {
+                    logMsg("<br><span style='color: purple'><b>[DEBRIEF] Transcript:</b> " + data.transcript + "</span>");
+                } else if (data.type === "error") {
+                    logMsg("<span style='color: red'>[DEBRIEF ERROR] " + data.message + "</span>");
+                }
+            };
+
+            debriefWs.onerror = function (err) {
+                logMsg("<span style='color: red'>Debrief WebSocket Error</span>");
+            };
+
+            debriefWs.onclose = function () {
+                logMsg("<b>[DEBRIEF] DISCONNECTED</b>");
+            };
+        }
+
+        function sendTextQuestion() {
+            if (!debriefWs || debriefWs.readyState !== WebSocket.OPEN) {
+                alert("Connect to Debrief Room first!");
+                return;
+            }
+            const q = document.getElementById("textQuestion").value;
+            if (!q) return;
+
+            const target = document.getElementById("targetAgent").value;
+            logMsg("<b>[User -> " + target.toUpperCase() + "]</b> " + q);
+            debriefWs.send(JSON.stringify({
+                question: q,
+                target_agent: target
+            }));
+            document.getElementById("textQuestion").value = ""; // clear
+        }
+
+        async function toggleRecording() {
+            const btn = document.getElementById("recordBtn");
+            const status = document.getElementById("recordStatus");
+
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+                btn.innerHTML = "🎤 Start Recording";
+                status.style.display = "none";
+                return;
+            }
+
+            if (!debriefWs || debriefWs.readyState !== WebSocket.OPEN) {
+                alert("Connect to Debrief Room first!");
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    logMsg("[DEBRIEF] Uploading audio for transcription...");
+
+                    const formData = new FormData();
+                    formData.append("file", audioBlob, "voice.webm");
+
+                    try {
+                        const response = await fetch("http://localhost:8001/api/transcribe", {
+                            method: "POST",
+                            body: formData
+                        });
+                        const data = await response.json();
+
+                        if (data.transcript) {
+                            logMsg("<span style='color: purple'>[Transcribed] " + data.transcript + "</span>");
+                            const target = document.getElementById("targetAgent").value;
+                            logMsg("<b>[User Voice -> " + target.toUpperCase() + "]</b> " + data.transcript);
+
+                            debriefWs.send(JSON.stringify({
+                                question: data.transcript,
+                                target_agent: target
+                            }));
+                        } else {
+                            logMsg("<span style='color: red'>[DEBRIEF ERROR] " + (data.error || "Transcription failed") + "</span>");
+                        }
+                    } catch (e) {
+                        logMsg("<span style='color: red'>[DEBRIEF ERROR] API call failed: " + e.message + "</span>");
+                    }
+                };
+
+                mediaRecorder.start();
+                btn.innerHTML = "⏹ Stop Recording";
+                status.style.display = "inline";
+
+            } catch (err) {
+                alert("Microphone access denied or error: " + err);
+            }
+        }
+
+        function playPCMChunk(float32Data) {
+            if (!audioContext) return;
+
+            const buffer = audioContext.createBuffer(1, float32Data.length, audioContext.sampleRate);
+            buffer.copyToChannel(float32Data, 0);
+
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+
+            const currentTime = audioContext.currentTime;
+            const playTime = Math.max(currentTime, nextPlayTime);
+
+            source.start(playTime);
+            nextPlayTime = playTime + buffer.duration;
+        }
+    </script>
+</body>
+
+</html>
