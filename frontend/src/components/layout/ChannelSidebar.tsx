@@ -110,7 +110,7 @@ export function ChannelSidebar() {
       {/* Workspace header */}
       <div className="flex items-center justify-between px-4 h-14 border-b border-[#E2E8F0]">
         <div className="min-w-0">
-          <div className="font-semibold text-sm text-[#1E293B] truncate">CareLounge</div>
+          <div className="font-semibold text-sm text-[#1E293B] truncate">Hearthside</div>
           {discharge && (
             <div className="text-[10px] text-[#64748B] truncate max-w-[160px]">
               {discharge.patient_profile.procedure}

@@ -149,7 +149,7 @@ function TopBar() {
     <header className="flex items-center justify-between px-6 h-14 bg-white border-b border-[#E2E8F0] shrink-0 relative z-40">
       <div className="flex items-center gap-2">
         <Activity size={20} className="text-[#0891B2]" />
-        <span className="text-lg font-semibold text-[#1E293B]">CareLounge</span>
+        <span className="text-lg font-semibold text-[#1E293B]">Hearthside</span>
         <span className="text-[#CBD5E1] mx-1">/</span>
         <span className="text-sm text-[#64748B]">{ROOM_NAMES[activeRoom]}</span>
       </div>

@@ -14,7 +14,7 @@ const spaceMono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CareLounge — Post-Acute Care Copilot",
+  title: "Hearthside — Post-Acute Care Copilot",
   description: "Your discharge instructions, medications, and recovery plan — in one place.",
 };
 
