@@ -11,3 +11,5 @@ deepgram-sdk>=3.0.0
 langgraph>=0.2.0
 langchain-core>=0.3.0
 modal>=0.73.0
+faiss-cpu>=1.8.0
+sentence-transformers>=2.7.0

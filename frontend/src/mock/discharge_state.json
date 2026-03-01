@@ -1,0 +1,84 @@
+{
+  "patient_profile": {
+    "patient_name": "Elena",
+    "procedure": "Right Rotator Cuff Repair (Arthroscopic)",
+    "discharge_date": "2026-02-28",
+    "attending_physician": "Dr. James Park, Orthopedics"
+  },
+  "medications": [
+    {
+      "name": "Oxycodone",
+      "dosage": "5mg",
+      "frequency": "Every 4-6 hours as needed for severe pain",
+      "instructions": "Take with food to prevent nausea. Do not drive or operate machinery. Taper off as shoulder pain improves.",
+      "domain_flags": ["pain_management", "narcotic"]
+    },
+    {
+      "name": "Ibuprofen",
+      "dosage": "600mg",
+      "frequency": "Every 8 hours with food",
+      "instructions": "Take scheduled for the first 5 days to reduce shoulder inflammation. Do not combine with other NSAIDs.",
+      "domain_flags": ["anti_inflammatory", "scheduled"]
+    },
+    {
+      "name": "Cyclobenzaprine",
+      "dosage": "5mg",
+      "frequency": "At bedtime as needed",
+      "instructions": "Reduces shoulder and arm muscle spasms at night. Causes drowsiness — do not drive or drink alcohol.",
+      "domain_flags": ["muscle_relaxant", "sedating"]
+    }
+  ],
+  "restrictions": [
+    {
+      "category": "Arm Immobilization",
+      "rule": "Wear the shoulder sling at all times for the first 4 weeks, including while sleeping.",
+      "timeline": "Weeks 1–4",
+      "strict_prohibitions": [
+        "No reaching overhead",
+        "No lifting anything heavier than a cup of water",
+        "No driving until sling is removed"
+      ]
+    },
+    {
+      "category": "Wound Care",
+      "rule": "Keep the surgical dressing clean and dry. You may shower after 48 hours with the shoulder wrapped in plastic.",
+      "strict_prohibitions": [
+        "No baths",
+        "No submerging shoulder in water for 3 weeks",
+        "No hot tubs or pools"
+      ]
+    },
+    {
+      "category": "Physical Therapy",
+      "rule": "Pendulum exercises only during Week 1. PT-guided passive range of motion begins Week 2. Do not force arm above 60 degrees.",
+      "timeline": "Week 1 onwards",
+      "sandbox_trigger": "arm_arc_60_deg"
+    }
+  ],
+  "warning_signs": [
+    {
+      "symptom": "Sudden severe pain or complete loss of arm strength",
+      "implication": "Possible nerve injury or suture failure",
+      "action": "Go to the Emergency Room immediately",
+      "keywords": ["can't move", "no strength", "arm feels dead", "completely numb", "sudden pain", "worst pain", "can't lift", "sharp pain shooting"]
+    },
+    {
+      "symptom": "Hand or fingers turning blue, white, or cold",
+      "implication": "Possible vascular compromise from sling pressure or swelling",
+      "action": "Loosen the sling and go to the Emergency Room immediately",
+      "keywords": ["blue", "purple", "cold fingers", "cold hand", "can't feel fingers", "tingling fingers", "circulation", "fingers white"]
+    },
+    {
+      "symptom": "Fever over 101.5°F, chills, or increasing redness around the incision",
+      "implication": "Potential surgical site infection",
+      "action": "Call Dr. Park's office immediately",
+      "keywords": ["fever", "chills", "infection", "redness", "warm to touch", "pus", "discharge from wound", "foul smell", "temperature over 101"]
+    },
+    {
+      "symptom": "Sudden shoulder swelling, severe bruising, or a popping sensation",
+      "implication": "Potential re-tear or hematoma",
+      "action": "Call Dr. Park's office or go to the Emergency Room",
+      "keywords": ["popping", "pop", "felt a pop", "swelling", "swollen", "bruising", "bruise", "feels loose", "gave way", "tore again"]
+    }
+  ]
+}

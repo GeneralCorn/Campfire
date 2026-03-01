@@ -7,9 +7,9 @@ const analysers: Record<string, AnalyserNode> = {}
 const nextStartTime: Record<string, number> = {}
 
 const PAN_VALUES: Record<string, number> = {
-  scout: -0.7,
-  critic: 0.0,
-  synthesizer: 0.7,
+  medications: -0.7,
+  recovery: 0.0,
+  emergency: 0.7,
 }
 
 /** Call this inside a user-gesture handler (button click) before any playback. */

@@ -1,9 +1,6 @@
 "use client";
 
 import { useAppStore } from "@/stores/useAppStore";
-import { TeammateStage } from "./TeammateStage";
-import { NowThinkingStrip } from "./NowThinkingStrip";
-import { ChatArea } from "./ChatArea";
 import { TaskInput } from "./TaskInput";
 import { Volume2, Radio, Users } from "lucide-react";
 
@@ -17,7 +14,7 @@ export function TeamRoom() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Top bar with accent border */}
+      {/* Top bar */}
       <div className="flex items-center justify-between px-4 h-12 border-b border-white/[0.06] border-t-2 border-t-broadcast shrink-0">
         <div className="flex items-center gap-2">
           <Volume2 size={18} className="text-text-dim" />
@@ -40,16 +37,7 @@ export function TeamRoom() {
         </div>
       </div>
 
-      {/* Teammate stage */}
-      <TeammateStage />
-
-      {/* Now thinking strip */}
-      <NowThinkingStrip />
-
-      {/* Chat area */}
-      <ChatArea />
-
-      {/* Input */}
+      <div className="flex-1" />
       <TaskInput />
     </div>
   );

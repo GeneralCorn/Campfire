@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { Outfit, Space_Mono } from "next/font/google";
+import { Inter, Space_Mono } from "next/font/google";
 import "./globals.css";
 
-const outfit = Outfit({
-  variable: "--font-outfit",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
@@ -14,8 +14,8 @@ const spaceMono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AgentFM — Your AI Team, Always Online",
-  description: "AI teammates that collaborate, remember, and grow with you",
+  title: "CareLounge — Post-Acute Care Copilot",
+  description: "Your discharge instructions, medications, and recovery plan — in one place.",
 };
 
 export default function RootLayout({
@@ -25,9 +25,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${outfit.variable} ${spaceMono.variable} font-sans bg-surface-0 text-text-primary antialiased`}
-      >
+      <body className={`${inter.variable} ${spaceMono.variable} font-sans antialiased`}>
         {children}
       </body>
     </html>

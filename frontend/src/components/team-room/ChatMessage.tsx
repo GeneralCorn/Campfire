@@ -8,9 +8,10 @@ import { Avatar } from "./Avatar";
 
 interface ChatMessageProps {
   message: Message;
+  messageIndex?: number;
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, messageIndex = 0 }: ChatMessageProps) {
   const [showThinking, setShowThinking] = useState(false);
   const isUser = message.sender === "user";
   const isSystem = message.sender === "system";

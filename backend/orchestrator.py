@@ -21,9 +21,9 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env.local"))
 # Configuration
 # ==============================================================================
 
-# LLM — Anthropic (Claude)
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+# LLM — Modal vLLM (OpenAI-compatible)
+MODAL_URL = os.getenv("MODAL_URL", "")
+MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
 
 # APIs
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
@@ -148,10 +148,8 @@ def parse_llm_response(raw_text: str) -> dict:
 
 async def call_llm(agent_id: str, topic: str, conversation_history: str) -> dict:
     """
-    Calls the Anthropic API with the strict system prompts.
+    Calls the Modal vLLM API with the strict system prompts.
     """
-    import anthropic
-
     print(f"\n[LLM] Requesting turn for {agent_id.upper()}...")
 
     agent_config = AGENTS[agent_id]
@@ -173,23 +171,29 @@ async def call_llm(agent_id: str, topic: str, conversation_history: str) -> dict
         user_prompt += f"Here is the conversation so far:\n{conversation_history}\n\n"
     user_prompt += f"It is your turn to speak as the {agent_id.capitalize()}."
 
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-    response = await client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=2048,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
-    raw_text = response.content[0].text
+    url = f"{MODAL_URL}/v1/chat/completions"
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.7,
+        "max_tokens": 2048,
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        raw_text = data["choices"][0]["message"]["content"]
+
     return parse_llm_response(raw_text)
 
 
 async def call_debrief_llm(agent_name: str, supermemory_context: str, user_question: str) -> dict:
     """
-    Calls Anthropic API with the debrief system prompt.
+    Calls Modal vLLM with the debrief system prompt.
     """
-    import anthropic
-
     system_prompt = f"""You are {agent_name.capitalize()}, an AI analyst who just finished a live debate. You have access to your memory of what you said and thought during the debate.
 
 Here is your memory from the debate:
@@ -215,14 +219,22 @@ CRITICAL RULES:
 {{"spoken_message": "The actual words you say aloud", "confidence": 0.85, "sentiment": "analytical"}}
 """
 
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-    response = await client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=2048,
-        system=system_prompt,
-        messages=[{"role": "user", "content": f"Question from the user: '{user_question}'"}],
-    )
-    raw_text = response.content[0].text
+    url = f"{MODAL_URL}/v1/chat/completions"
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Question from the user: '{user_question}'"},
+        ],
+        "temperature": 0.7,
+        "max_tokens": 2048,
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        raw_text = data["choices"][0]["message"]["content"]
+
     return parse_llm_response(raw_text)
 
 
@@ -641,6 +653,7 @@ async def lab_run(request: Request):
     query = body.get("query", "")
     medications = body.get("medications", [])
     image_b64 = body.get("image", None)
+    patient_context = body.get("patient_context", None)
 
     async def event_stream():
         session_id = str(uuid.uuid4())
@@ -651,9 +664,11 @@ async def lab_run(request: Request):
             "medications": medications,
             "has_image": image_b64 is not None,
             "image_b64": image_b64,
+            "patient_context": patient_context,
             "needs_vlm": False,
-            "needs_ner": False,
+            "needs_mediapipe": False,
             "needs_fda_check": False,
+            "needs_mistral": False,
             "needs_visualization": False,
             "gpu_tier": None,
             "maya_research": None,

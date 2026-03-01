@@ -9,6 +9,8 @@ export const teammates: Record<string, Teammate> = {
     colorHex: "#4ECDC4",
     personality: "Methodical, thorough, detail-oriented. Reads prescriptions and searches PubMed.",
     voiceId: "21m00Tcm4TlvDq8ikWAM",
+    profile: "woman",
+    profileVariant: 1,
   },
   rex: {
     id: "rex",
@@ -18,6 +20,8 @@ export const teammates: Record<string, Teammate> = {
     colorHex: "#FF6B6B",
     personality: "Careful, authoritative, never hand-waves safety concerns. Cross-references FDA databases.",
     voiceId: "29vD33N1CtxCmqQRPOHJ",
+    profile: "man",
+    profileVariant: 1,
   },
   sol: {
     id: "sol",
@@ -27,6 +31,8 @@ export const teammates: Record<string, Teammate> = {
     colorHex: "#FFE66D",
     personality: "Warm, clear, makes complex medical information accessible.",
     voiceId: "EXAVITQu4vr4xnSDxMaL",
+    profile: "man",
+    profileVariant: 2,
   },
 };
 

@@ -19,15 +19,21 @@ const ORCHESTRATOR_URL =
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { task, history = [], mode = "auto", image } = body;
+  const { task, history = [], mode = "auto", image, patient_context } = body;
 
-  // Extract medication names from the task text for the backend
+  // Seed medications from patient chart; fall back to regex extraction from query text
   const medications: string[] = [];
-  const medPatterns = /\b(metformin|lisinopril|aspirin|atorvastatin|omeprazole|amlodipine|losartan|gabapentin|hydrochlorothiazide|simvastatin|levothyroxine|warfarin|clopidogrel|prednisone|insulin)\b/gi;
-  let match;
-  while ((match = medPatterns.exec(task)) !== null) {
-    const med = match[1].toLowerCase();
-    if (!medications.includes(med)) medications.push(med);
+  if (patient_context?.medications?.length) {
+    for (const m of patient_context.medications) {
+      if (m.name && !medications.includes(m.name)) medications.push(m.name);
+    }
+  } else {
+    const medPatterns = /\b(metformin|lisinopril|aspirin|atorvastatin|omeprazole|amlodipine|losartan|gabapentin|hydrochlorothiazide|simvastatin|levothyroxine|warfarin|clopidogrel|prednisone|insulin|oxycodone|ibuprofen|cyclobenzaprine)\b/gi;
+    let match;
+    while ((match = medPatterns.exec(task)) !== null) {
+      const med = match[1].toLowerCase();
+      if (!medications.includes(med)) medications.push(med);
+    }
   }
 
   try {
@@ -40,6 +46,7 @@ export async function POST(request: NextRequest) {
         history,
         mode,
         ...(image ? { image } : {}),
+        ...(patient_context ? { patient_context } : {}),
       }),
       signal: request.signal,
     });

@@ -5,7 +5,68 @@ import { useAppStore } from "@/stores/useAppStore";
 import { initAudio, playChunk, stopAll } from "@/lib/audio-player";
 import type { TeammateId, TeammateState, PipelineNodeId, ChannelId } from "@/types";
 
-/** Map sentiment string from LLM → sprite state for richer animations. */
+// ── Generic SSE hook ──────────────────────────────────────────────────────────
+// Lightweight hook for flexible SSE/streaming fetch use cases.
+
+export function useSSE<T = Record<string, unknown>>(
+  onEvent: (data: T) => void
+) {
+  const abortRef = useRef<AbortController | null>(null);
+
+  const connect = useCallback(
+    async (url: string, body?: Record<string, unknown>) => {
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+
+      try {
+        const res = await fetch(url, {
+          method: body ? "POST" : "GET",
+          headers: { "Content-Type": "application/json" },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: abortRef.current.signal,
+        });
+
+        if (!res.ok || !res.body) return;
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              onEvent(JSON.parse(line.slice(6)) as T);
+            } catch {
+              // skip malformed events
+            }
+          }
+        }
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          console.error("[useSSE] stream error:", err);
+        }
+      }
+    },
+    [onEvent]
+  );
+
+  const abort = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  return { connect, abort };
+}
+
+// ── sentimentToState helper ───────────────────────────────────────────────────
+
 function sentimentToState(sentiment: string | undefined): TeammateState {
   if (!sentiment) return "talking";
   const s = sentiment.toLowerCase();
@@ -15,22 +76,25 @@ function sentimentToState(sentiment: string | undefined): TeammateState {
   return "talking";
 }
 
+// ── useTeamChat — full pipeline SSE hook (drives PipelineGraph + TTS) ────────
+
 export function useTeamChat() {
   const abortRef = useRef<AbortController | null>(null);
   const audioInitialized = useRef(false);
 
-  const addMessage = useAppStore((s) => s.addMessage);
-  const appendToMessage = useAppStore((s) => s.appendToMessage);
-  const setTeammateState = useAppStore((s) => s.setTeammateState);
-  const setMessageStreaming = useAppStore((s) => s.setMessageStreaming);
+  const addMessage           = useAppStore((s) => s.addMessage);
+  const appendToMessage      = useAppStore((s) => s.appendToMessage);
+  const setTeammateState     = useAppStore((s) => s.setTeammateState);
+  const setMessageStreaming   = useAppStore((s) => s.setMessageStreaming);
   const resetAllTeammateStates = useAppStore((s) => s.resetAllTeammateStates);
-  const setIsStreaming = useAppStore((s) => s.setIsStreaming);
-  const setIsLive = useAppStore((s) => s.setIsLive);
-  const addSandboxEntry = useAppStore((s) => s.addSandboxEntry);
-  const addMemory = useAppStore((s) => s.addMemory);
-  const setCurrentSessionId = useAppStore((s) => s.setCurrentSessionId);
+  const setIsStreaming        = useAppStore((s) => s.setIsStreaming);
+  const setIsLive             = useAppStore((s) => s.setIsLive);
+  const addSandboxEntry        = useAppStore((s) => s.addSandboxEntry);
+  const addMemory              = useAppStore((s) => s.addMemory);
+  const addDiscoveredWarning   = useAppStore((s) => s.addDiscoveredWarning);
+  const setCurrentSessionId    = useAppStore((s) => s.setCurrentSessionId);
   const setPipelineNodeStatus = useAppStore((s) => s.setPipelineNodeStatus);
-  const resetPipeline = useAppStore((s) => s.resetPipeline);
+  const resetPipeline         = useAppStore((s) => s.resetPipeline);
 
   // Track current streaming message per teammate
   const currentMsgIds = useRef<Record<string, string>>({});
@@ -42,7 +106,6 @@ export function useTeamChat() {
 
   const sendTask = useCallback(
     async (task: string, history: Array<{ role: string; content: string }>) => {
-      // Abort any existing stream
       abortRef.current?.abort();
       abortRef.current = new AbortController();
 
@@ -62,19 +125,26 @@ export function useTeamChat() {
       if (image) useAppStore.getState().setPendingImage(null);
 
       try {
-        const response = await fetch("/api/team-chat", {
+        const discharge = useAppStore.getState().discharge;
+        const res = await fetch("/api/team-chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ task, history, mode: "auto", ...(image ? { image } : {}) }),
+          body: JSON.stringify({
+            task,
+            history,
+            mode: "auto",
+            ...(image ? { image } : {}),
+            ...(discharge ? { patient_context: discharge } : {}),
+          }),
           signal: abortRef.current.signal,
         });
 
-        if (!response.ok || !response.body) {
-          console.error("[SSE] Backend returned", response.status);
+        if (!res.ok || !res.body) {
+          console.error("[SSE] Backend returned", res.status);
           addMessage({
             id: `err-${Date.now()}`,
             sender: "system",
-            content: `Backend error (${response.status}): Could not reach the pipeline. Is the backend running on port 8001?`,
+            content: `Backend error (${res.status}): Could not reach the pipeline. Is the backend running on port 8001?`,
             timestamp: Date.now(),
             channel: activeChannelRef.current,
           });
@@ -82,7 +152,7 @@ export function useTeamChat() {
           return;
         }
 
-        const reader = response.body.getReader();
+        const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
 
@@ -92,7 +162,7 @@ export function useTeamChat() {
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n\n");
-          buffer = lines.pop() || "";
+          buffer = lines.pop() ?? "";
 
           for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
@@ -116,13 +186,12 @@ export function useTeamChat() {
             channel: activeChannelRef.current,
           });
         }
-      } finally {
-        setIsStreaming(false);
-        resetAllTeammateStates();
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [addMessage, appendToMessage, setTeammateState, setMessageStreaming,
+     resetAllTeammateStates, setIsStreaming, setIsLive, addSandboxEntry,
+     addMemory, addDiscoveredWarning, setCurrentSessionId, setPipelineNodeStatus, resetPipeline]
   );
 
   function handleEvent(data: Record<string, unknown>) {
@@ -137,7 +206,6 @@ export function useTeamChat() {
       case "thinking": {
         if (teammate) {
           setTeammateState(teammate, "thinking");
-          // Update pipeline node if teammate is a known node
           const nodeId = teammate as PipelineNodeId;
           if (nodeId === "maya" || nodeId === "rex" || nodeId === "sol") {
             setPipelineNodeStatus(nodeId, "running");
@@ -147,12 +215,10 @@ export function useTeamChat() {
       }
 
       case "task_result": {
-        // Store sentiment for sprite state selection during talking
         if (teammate && data.sentiment) {
           currentSentiment.current[teammate] = data.sentiment as string;
         }
 
-        // Add thinking behind toggle, sandbox action
         if (data.action && typeof data.action === "object") {
           const action = data.action as { type: string; detail: string };
           if (action.type !== "none" && teammate) {
@@ -169,14 +235,12 @@ export function useTeamChat() {
       }
 
       case "voice_text": {
-        // Full subtitle text emitted once — create the chat message
         if (!teammate) break;
 
         const text = (data.text as string) || "";
         const msgId = `live-${teammate}-${Date.now()}`;
         currentMsgIds.current[teammate] = msgId;
 
-        // Use sentiment to pick a richer sprite state
         const sentiment = currentSentiment.current[teammate];
         const spriteState = sentimentToState(sentiment);
         setTeammateState(teammate, spriteState);
@@ -194,7 +258,6 @@ export function useTeamChat() {
         break;
       }
 
-      // Legacy: still handle voice_chunk for backwards compat
       case "voice_chunk": {
         if (!teammate) break;
 
@@ -220,7 +283,6 @@ export function useTeamChat() {
       }
 
       case "audio_chunk": {
-        // Initialize audio context on first chunk (needs user gesture context)
         if (!audioInitialized.current) {
           initAudio();
           audioInitialized.current = true;
@@ -249,6 +311,9 @@ export function useTeamChat() {
             type: "log",
             text: `[${teammate}] Sandbox provisioning...${data.packages ? ` (${(data.packages as string[]).join(", ")})` : ""}${data.gpu ? ` [GPU: ${data.gpu}]` : ""}`,
             timestamp: Date.now(),
+            model: (data.model as string) ?? undefined,
+            gpuTier: data.gpu ? (data.gpu as string) : undefined,
+            packages: data.packages ? (data.packages as string[]) : undefined,
           });
         }
         break;
@@ -302,7 +367,6 @@ export function useTeamChat() {
           }
           delete currentSentiment.current[teammate];
           setTeammateState(teammate, "idle");
-          // Mark pipeline node done
           const nodeId = teammate as PipelineNodeId;
           if (nodeId === "maya" || nodeId === "rex" || nodeId === "sol") {
             setPipelineNodeStatus(nodeId, "done");
@@ -320,12 +384,22 @@ export function useTeamChat() {
           timestamp: Date.now(),
           channel: activeChannelRef.current,
         });
-        // Show error in pipeline activity log so it's visible
         addSandboxEntry({
           id: `sb-err-${Date.now()}-${Math.random()}`,
           teammateId: "system" as TeammateId,
           type: "flag",
           text: `ERROR: ${data.message}`,
+          timestamp: Date.now(),
+        });
+        break;
+      }
+
+      case "warning_flagged": {
+        addDiscoveredWarning({
+          id: `warn-${Date.now()}-${Math.random()}`,
+          symptom: data.symptom as string,
+          severity: (data.severity as "urgent" | "watch") ?? "watch",
+          agent: (data.agent as string) ?? "system",
           timestamp: Date.now(),
         });
         break;
@@ -342,7 +416,7 @@ export function useTeamChat() {
 
   const interrupt = useCallback(() => {
     abortRef.current?.abort();
-    stopAll(); // Stop audio playback
+    stopAll();
     audioInitialized.current = false;
     resetAllTeammateStates();
     setIsStreaming(false);

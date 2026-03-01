@@ -1,54 +1,47 @@
-import type { ChannelId } from "@/types";
+import type { PanelId } from "@/types";
 
 export interface Channel {
-  id: ChannelId;
+  id: PanelId;
   name: string;
-  type: "voice" | "text";
+  type: "text" | "voice";
   section: string;
-  description?: string;
+  description: string;
 }
 
 export const channels: Channel[] = [
   {
-    id: "team-room",
-    name: "rounds",
-    type: "voice",
-    section: "VOICE CHANNELS",
-    description: "Medical team rounds — Maya, Rex, and Sol working together",
-  },
-  {
-    id: "hangout",
-    name: "consult",
-    type: "voice",
-    section: "VOICE CHANNELS",
-    description: "Voice chat — ask any agent about its reasoning",
-  },
-  {
-    id: "debate",
-    name: "lab",
-    type: "voice",
-    section: "WORKSPACE",
-    description: "Full medical pipeline with live container graph",
-  },
-  {
-    id: "debrief",
-    name: "debrief-room",
-    type: "voice",
-    section: "DEBATE",
-    description: "Interrogate any agent after the debate",
-  },
-  {
-    id: "sandbox",
-    name: "artifacts",
+    id: "overview",
+    name: "overview",
     type: "text",
-    section: "WORKSPACE",
-    description: "Documents and image upload for VLM analysis",
+    section: "PATIENT",
+    description: "Procedure summary and discharge details",
   },
   {
-    id: "memories",
-    name: "history",
+    id: "medications",
+    name: "medications",
     type: "text",
-    section: "INSIGHTS",
-    description: "Session memory and medication history",
+    section: "PATIENT",
+    description: "Medication schedule and instructions",
+  },
+  {
+    id: "restrictions",
+    name: "restrictions",
+    type: "text",
+    section: "PATIENT",
+    description: "Activity restrictions and wound care",
+  },
+  {
+    id: "warnings",
+    name: "warning signs",
+    type: "text",
+    section: "PATIENT",
+    description: "Symptoms requiring immediate action",
+  },
+  {
+    id: "ask",
+    name: "ask copilot",
+    type: "voice",
+    section: "COPILOT",
+    description: "Voice Q&A — ask anything about your care plan",
   },
 ];

@@ -1,46 +1,147 @@
+// ── Campfire Lab agent types (SSE / PipelineGraph) ───────────────────────────
+
 export type TeammateId = "maya" | "rex" | "sol";
 export type TeammateState = "idle" | "thinking" | "talking" | "interrupted" | "reacting" | "agreeing";
 export type ChannelId =
   | "team-room"
   | "sandbox"
   | "memories"
-  | "debate";
+  | "debate"
+  | "hangout";
 
 export type AgentId = "scout" | "critic" | "synthesizer";
 
-export interface AgentState {
-  confidence: number;
-  sentiment: string;
-  speaking: boolean;
-  thinking: boolean;
-  spokenMessage: string;
-}
-
-export interface DebateMessage {
-  id: string;
-  agentId: AgentId | "system";
-  content: string;
-  timestamp: number;
-}
-
-export interface DebriefMessage {
-  id: string;
-  role: "user" | AgentId;
-  content: string;
-  timestamp: number;
-  confidence?: number;
-  sentiment?: string;
-}
-
 export interface Teammate {
-  id: TeammateId;
+  id: string;
   name: string;
   role: string;
   badge: string;
   colorHex: string;
   personality: string;
   voiceId: string;
+  profile: "man" | "woman";
+  profileVariant: 1 | 2;
 }
+
+// ── Discharge data — mirrors backend/mock_data/discharge_state.json exactly ──
+
+export interface PatientProfile {
+  patient_name?: string;
+  procedure: string;
+  discharge_date: string;
+  attending_physician: string;
+}
+
+export interface Medication {
+  name: string;
+  dosage: string;
+  frequency: string;
+  instructions: string;
+  domain_flags: string[];
+}
+
+export interface Restriction {
+  category: string;
+  rule: string;
+  timeline?: string;
+  strict_prohibitions?: string[];
+  sandbox_trigger?: string;
+}
+
+export interface WarnSign {
+  symptom: string;
+  implication: string;
+  action: string;
+  keywords?: string[];
+}
+
+export interface DischargeState {
+  patient_profile: PatientProfile;
+  medications: Medication[];
+  restrictions: Restriction[];
+  warning_signs: WarnSign[];
+}
+
+// ── Discovered warning signs (populated by agents through chat, not pre-loaded) ──
+
+export interface DiscoveredWarning {
+  id: string;
+  symptom: string;
+  severity: "urgent" | "watch";
+  agent: string;
+  timestamp: number;
+}
+
+// ── Navigation ──
+
+export type PanelId =
+  | "overview"
+  | "medications"
+  | "restrictions"
+  | "warnings"
+  | "ask";
+
+// ── Room-based navigation ──
+
+export type RoomId =
+  | "lounge"
+  | "medication-room"
+  | "recovery-room"
+  | "emergency-room"
+  | "overview"
+  | "medications"
+  | "restrictions"
+  | "warning-signs";
+
+export type AgentName = "Medication Agent" | "Recovery Agent" | "Emergency Agent";
+
+// ── Lounge messages (Slack-style group feed, patient UI) ──
+
+export interface LoungeMessage {
+  id: string;
+  agent: AgentName | "user";
+  text: string;
+  timestamp: number;
+}
+
+// ── Agent room messages (bubble-style 1-on-1) ──
+
+export interface RoomMessage {
+  id: string;
+  role: "user" | "agent";
+  text: string;
+  timestamp: number;
+}
+
+// ── Conversation (Ask panel) ──
+
+export interface ConversationTurn {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+  /** Which domain the router classified this under */
+  domain?: string;
+}
+
+// ── Care Team Activity (RightPanel) ──
+
+export type ActivityRoute =
+  | "medications"
+  | "recovery"
+  | "emergency"
+  | "confer"
+  | "blocked";
+
+export interface ActivityEntry {
+  id: string;
+  timestamp: number;
+  route: ActivityRoute;
+  audio_text: string;
+  off_topic: boolean;
+}
+
+// ── Lab / Debate messages (for SSE streaming and TeamRoom) ───────────────────
 
 export interface Message {
   id: string;
@@ -77,17 +178,21 @@ export interface SandboxEntry {
   type: "log" | "write" | "flag";
   text: string;
   timestamp: number;
+  model?: string;      // "vlm" | "mediapipe" | "mistral" | "research" | "biobert" | "viz" | "fda"
+  gpuTier?: string;    // "T4" | "A10G" | "H100" etc.
+  packages?: string[]; // pip packages installed in the sandbox
 }
 
 export interface ArtifactSection {
-  id: string;
+  id?: string;
   heading: string;
   content: string;
-  authorId: TeammateId;
-  timestamp: number;
+  type?: string;
+  authorId?: string;
 }
 
-// Pipeline visualization
+// ── Pipeline visualization ──
+
 export type PipelineNodeId = "router" | "maya" | "rex" | "sol" | "synthesize";
 export type PipelineNodeStatus = "pending" | "running" | "sandbox" | "done";
 export interface PipelineNode {
@@ -98,4 +203,31 @@ export interface PipelineNode {
   gpu?: string | null;
   startedAt?: number;
   completedAt?: number;
+}
+
+// ── Agent states (for debate room) ──
+
+export interface AgentState {
+  confidence: number;
+  sentiment: string;
+  speaking: boolean;
+  thinking: boolean;
+  spokenMessage: string;
+}
+
+export interface DebateMessage {
+  id: string;
+  agentId: AgentId;
+  content: string;
+  confidence: number;
+  sentiment: string;
+  timestamp: number;
+}
+
+export interface DebriefMessage {
+  id: string;
+  role: "user" | "agent";
+  agentId?: AgentId;
+  content: string;
+  timestamp: number;
 }

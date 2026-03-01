@@ -70,7 +70,7 @@ export function HangoutView() {
         {teammateList.map((tm) => (
           <button
             key={tm.id}
-            onClick={() => setHangoutTeammate(tm.id)}
+            onClick={() => setHangoutTeammate(tm.id as import("@/types").TeammateId)}
             className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg mb-1 transition-colors cursor-pointer ${
               hangoutTeammate === tm.id
                 ? "bg-white/[0.04]"
@@ -148,8 +148,8 @@ export function HangoutView() {
             </div>
           ) : (
             <div className="py-2">
-              {hangoutMessages.map((m) => (
-                <ChatMessage key={m.id} message={m} />
+              {hangoutMessages.map((m, i) => (
+                <ChatMessage key={m.id} message={m} messageIndex={i} />
               ))}
             </div>
           )}

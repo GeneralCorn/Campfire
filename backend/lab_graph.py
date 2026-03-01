@@ -18,7 +18,7 @@ import base64
 from typing import Optional, Annotated
 from operator import add
 
-import anthropic
+import httpx
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langgraph.config import get_stream_writer
@@ -37,8 +37,8 @@ from lab_tools import (
 # Config
 # ---------------------------------------------------------------------------
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+MODAL_URL = os.getenv("MODAL_URL", "")
+MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
 ELEVENLABS_OUTPUT_FORMAT = os.getenv("ELEVENLABS_OUTPUT_FORMAT", "pcm_24000")
@@ -55,10 +55,14 @@ class LabState(TypedDict):
     has_image: bool
     image_b64: Optional[str]
 
+    # Patient discharge context (forwarded from frontend)
+    patient_context: Optional[dict]
+
     # Routing flags (set by router)
-    needs_vlm: bool
-    needs_ner: bool             # BioBERT NER on discharge/clinical text
-    needs_fda_check: bool
+    needs_vlm: bool          # Image uploaded → VLM prescription/document reader
+    needs_mediapipe: bool    # PT/rehab/movement question → MediaPipe exercise analysis
+    needs_fda_check: bool    # Drug safety/interactions → OpenFDA + RxNorm sandbox
+    needs_mistral: bool      # General medical Q&A → finetuned Mistral sandbox
     needs_visualization: bool
     gpu_tier: Optional[str]  # e.g. "T4", "A10G", "H100" — picked by router
 
@@ -74,22 +78,61 @@ class LabState(TypedDict):
     synthesis: Optional[str]
 
 
+def _patient_block(state: LabState) -> str:
+    """Build a compact patient context block for agent prompts."""
+    ctx = state.get("patient_context") or {}
+    if not ctx:
+        return ""
+    p = ctx.get("patient_profile", {})
+    meds = ctx.get("medications", [])
+    restrictions = ctx.get("restrictions", [])
+    warnings = ctx.get("warning_signs", [])
+
+    parts = []
+    if p.get("procedure"):
+        parts.append(
+            f"PATIENT: {p.get('patient_name', 'the patient')}, "
+            f"post-op {p['procedure']} (discharged {p.get('discharge_date', 'recently')})"
+        )
+    if meds:
+        med_list = ", ".join(f"{m['name']} {m['dosage']}" for m in meds)
+        parts.append(f"PRESCRIBED: {med_list}")
+    if restrictions:
+        rest_list = "; ".join(
+            f"{r['category']}: {r['rule']}" + (f" [{r['timeline']}]" if r.get('timeline') else "")
+            for r in restrictions
+        )
+        parts.append(f"RESTRICTIONS: {rest_list}")
+    if warnings:
+        warn_list = " | ".join(f"{w['symptom']} → {w['action']}" for w in warnings)
+        parts.append(f"WARNING SIGNS TO WATCH FOR: {warn_list}")
+
+    return "\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # LLM Helper
 # ---------------------------------------------------------------------------
 
-def _call_anthropic(system_prompt: str, user_prompt: str, config_id: str = "maya") -> str:
-    """Low-level Anthropic call. Returns raw response text."""
-    print(f"[LLM] Calling {ANTHROPIC_MODEL} for {config_id}...")
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+def _call_modal(system_prompt: str, user_prompt: str, config_id: str = "maya") -> str:
+    """Low-level Modal vLLM call (sync). Returns raw response text."""
+    print(f"[LLM] Calling Modal vLLM ({MODEL_NAME}) for {config_id}...")
+    url = f"{MODAL_URL}/v1/chat/completions"
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.7,
+        "max_tokens": 2048,
+    }
     try:
-        response = client.messages.create(
-            model=ANTHROPIC_MODEL,
-            max_tokens=2048,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        raw_text = response.content[0].text
+        with httpx.Client(timeout=120.0) as client:
+            response = client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            raw_text = data["choices"][0]["message"]["content"]
         print(f"[LLM] {config_id} responded ({len(raw_text)} chars)")
         return raw_text
     except Exception as e:
@@ -98,8 +141,8 @@ def _call_anthropic(system_prompt: str, user_prompt: str, config_id: str = "maya
 
 
 def call_llm(system_prompt: str, user_prompt: str, config_id: str = "maya") -> dict:
-    """Call Anthropic API. Returns dict with reasoning, spoken_message, confidence, sentiment."""
-    raw_text = _call_anthropic(system_prompt, user_prompt, config_id)
+    """Call Modal vLLM. Returns dict with reasoning, spoken_message, confidence, sentiment."""
+    raw_text = _call_modal(system_prompt, user_prompt, config_id)
     return _parse_llm_response(raw_text)
 
 
@@ -246,29 +289,54 @@ def router_node(state: LabState) -> dict:
     writer = get_stream_writer()
 
     system_prompt = (
-        "You are a medical query router. Analyze the user's query and determine what tools are needed.\n\n"
-        "Output ONLY a valid JSON object (no markdown, no explanation) matching this schema:\n"
-        '{"medications": ["drug1", "drug2"], "needs_vlm": false, "needs_ner": false, '
-        '"needs_fda_check": true, "needs_visualization": true, "model_size_hint": "small"}\n\n'
-        "Rules:\n"
-        "- Extract all medication/drug names mentioned into the 'medications' list\n"
-        "- Set needs_vlm=true ONLY if the user uploaded an image (has_image=true)\n"
-        "- Set needs_ner=true if the user provides free-text clinical content (discharge instructions, "
-        "doctor's notes, clinical summaries) that needs entity extraction via BioBERT. "
-        "This is for extracting medications, dosages, conditions, and procedures from unstructured text.\n"
-        "- Set needs_fda_check=true if the user asks about drug interactions, side effects, safety, or mentions 2+ medications\n"
-        "- Set needs_visualization=true if a summary or visual would be helpful (usually true for drug interactions)\n"
-        '- model_size_hint: "small" for simple OCR/captioning or BioBERT NER (<1B), '
-        '"medium" for standard VLMs (3-7B), "large" for complex analysis needing big models (13B+), '
-        '"huge" for cutting-edge models (30B+). Default to "small" unless the task clearly needs more.\n'
+        "You are a medical AI router. Your job is to analyze the user's query and decide which specialized models to invoke.\n\n"
+        "Output ONLY a valid JSON object (no markdown, no explanation) matching this exact schema:\n"
+        '{"medications": ["drug1", "drug2"], "needs_vlm": false, "needs_mediapipe": false, '
+        '"needs_fda_check": false, "needs_mistral": false, "needs_visualization": false, "model_size_hint": "small"}\n\n'
+        "Available models and when to invoke them:\n\n"
+        "needs_vlm — Vision Language Model (image analysis: prescriptions OR visible skin/wound)\n"
+        "  SET TRUE when: has_image=true AND the user is either:\n"
+        "    (a) asking about a prescription label, medication bottle, or medical document image, OR\n"
+        "    (b) sharing a photo of a wound, incision, bruising, redness, swelling, or any visible skin/wound condition.\n"
+        "  Example triggers: 'what does this say', 'read my prescription', 'does this look normal',\n"
+        "  'is this swelling ok', 'my incision looks red', 'does this bruise look bad', image uploaded with health question.\n"
+        "  SET FALSE when: no image uploaded (has_image=false).\n\n"
+        "needs_mediapipe — MediaPipe joint-angle analysis (wrist and elbow ROM only)\n"
+        "  SCOPE: wrist extension/flexion, elbow bend angle, forearm rotation — NOT shoulder, knee, hip, or spine.\n"
+        "  SET TRUE when: user asks about wrist or elbow range of motion, wrist/elbow PT exercises,\n"
+        "  or elbow/forearm movement during recovery.\n"
+        "  Example triggers: 'wrist exercises', 'elbow PT', 'can I bend my wrist', 'wrist range of motion',\n"
+        "  'elbow flexion exercises', 'forearm stretches', 'wrist tendinitis exercises'.\n"
+        "  SET FALSE for shoulder-only questions, drug questions, image reading, or non-wrist/elbow conditions.\n\n"
+        "needs_fda_check — FDA/RxNorm drug safety lookup\n"
+        "  SET TRUE when: user asks about drug interactions, side effects, contraindications, medication safety,\n"
+        "  or mentions 2+ drug names together.\n"
+        "  Example triggers: 'interactions between X and Y', 'is it safe to take X with Y', 'side effects of X'.\n\n"
+        "needs_mistral — Finetuned Mistral medical model (general clinical Q&A)\n"
+        "  SET TRUE when: the question requires specialized medical knowledge not covered by the other models —\n"
+        "  symptoms, diagnoses, treatment options, medication explanations, clinical interpretation.\n"
+        "  This is the default research path when no other model is a better fit.\n"
+        "  SET FALSE when needs_vlm or needs_mediapipe already handles the query.\n\n"
+        "needs_visualization — Generate a visual summary card\n"
+        "  SET TRUE when: drug interactions are being checked (almost always true with needs_fda_check).\n\n"
+        "Additional rules:\n"
+        "- Extract all medication/drug names into the 'medications' list.\n"
+        '- model_size_hint: "small" (<3B), "medium" (3-7B), "large" (13B+), "huge" (30B+). '
+        'Only set "large" or "huge" if the image or task clearly requires a more capable VLM.\n'
+        "- Multiple models can be true at once (e.g. image of a prescription + drug interaction question → needs_vlm AND needs_fda_check).\n"
     )
 
-    user_prompt = f"User query: {state['user_query']}\nhas_image: {state['has_image']}"
+    patient_block = _patient_block(state)
+    user_prompt = (
+        f"User query: {state['user_query']}\n"
+        f"has_image: {state['has_image']}\n"
+        + (f"\n{patient_block}" if patient_block else "")
+    )
 
     SIZE_TO_PARAMS = {"small": 0.5, "medium": 7, "large": 14, "huge": 34}
 
     try:
-        raw_text = _call_anthropic(system_prompt, user_prompt, config_id="router")
+        raw_text = _call_modal(system_prompt, user_prompt, config_id="router")
 
         # Strip <think> tags and markdown code fences if present
         text = raw_text
@@ -282,17 +350,24 @@ def router_node(state: LabState) -> dict:
         parsed = json.loads(text)
         print(f"[ROUTER] Parsed routing JSON: {parsed}")
         medications = parsed.get("medications", state.get("medications", []))
+        # Ensure chart meds are always in the list
+        ctx = state.get("patient_context") or {}
+        for m in ctx.get("medications", []):
+            if m["name"] not in medications:
+                medications.append(m["name"])
         needs_vlm = parsed.get("needs_vlm", False)
-        needs_ner = parsed.get("needs_ner", False)
+        needs_mediapipe = parsed.get("needs_mediapipe", False)
         needs_fda = parsed.get("needs_fda_check", False)
+        needs_mistral = parsed.get("needs_mistral", False)
         needs_viz = parsed.get("needs_visualization", False)
         size_hint = parsed.get("model_size_hint", "small")
     except Exception as e:
         print(f"[ROUTER] Fallback due to: {e}")
         medications = state.get("medications", [])
         needs_vlm = state.get("has_image", False)
-        needs_ner = False
+        needs_mediapipe = False
         needs_fda = len(medications) >= 1
+        needs_mistral = not needs_vlm and not needs_fda
         needs_viz = len(medications) >= 1
         size_hint = "small"
 
@@ -302,8 +377,9 @@ def router_node(state: LabState) -> dict:
         "event": "router_plan",
         "plan": ["maya", "rex", "sol"],
         "needs_vlm": needs_vlm,
-        "needs_ner": needs_ner,
+        "needs_mediapipe": needs_mediapipe,
         "needs_fda": needs_fda,
+        "needs_mistral": needs_mistral,
         "needs_viz": needs_viz,
         "medications": medications,
         "gpu_tier": gpu_tier,
@@ -312,8 +388,9 @@ def router_node(state: LabState) -> dict:
     return {
         "medications": medications,
         "needs_vlm": needs_vlm,
-        "needs_ner": needs_ner,
+        "needs_mediapipe": needs_mediapipe,
         "needs_fda_check": needs_fda,
+        "needs_mistral": needs_mistral,
         "needs_visualization": needs_viz,
         "gpu_tier": gpu_tier,
     }
@@ -329,17 +406,21 @@ def maya_think_node(state: LabState) -> dict:
     meds_str = ", ".join(state["medications"]) if state["medications"] else "unknown"
 
     if state.get("needs_vlm"):
-        task_desc = "analyze the prescription image with Florence-2 VLM"
-    elif state.get("needs_ner"):
-        task_desc = "run BioBERT biomedical NER on the discharge text"
+        task_desc = "read and decode the prescription or medical document image with a VLM"
+    elif state.get("needs_mediapipe"):
+        task_desc = "analyze movement patterns and generate physical therapy exercise recommendations with MediaPipe"
+    elif state.get("needs_mistral"):
+        task_desc = "query the finetuned medical Mistral model for a clinical answer"
     else:
-        task_desc = "search PubMed for relevant clinical literature"
+        task_desc = "synthesize available context to answer the medical question"
 
+    patient_block = _patient_block(state)
     system_prompt = f"{config['system_prompt']}\n\n{FORMATTING_RULES}"
     user_prompt = (
         f"The user asked: '{state['user_query']}'\n"
         f"Medications identified: {meds_str}\n"
-        f"You are about to {task_desc}. Briefly introduce what you're going to do."
+        + (f"{patient_block}\n" if patient_block else "")
+        + f"You are about to {task_desc}. Briefly introduce what you're going to do."
     )
 
     result = call_llm(system_prompt, user_prompt, config_id="maya")
@@ -353,67 +434,101 @@ def maya_sandbox_node(state: LabState) -> dict:
     writer = get_stream_writer()
 
     has_image = state.get("has_image", False) and state.get("image_b64")
-    needs_ner = state.get("needs_ner", False)
+    needs_mediapipe = state.get("needs_mediapipe", False)
+    needs_mistral = state.get("needs_mistral", False)
 
     stdout_cb = lambda line: writer({"event": "sandbox_output", "teammate": "maya", "line": line})
     stderr_cb = lambda line: writer({"event": "sandbox_output", "teammate": "maya", "line": f"[stderr] {line}"})
 
     if has_image:
+        # VLM: prescription/document reader OR skin/wound visual assessment
         gpu = state.get("gpu_tier") or pick_gpu(model_params_b=0.5)
-        code = build_maya_vlm_code(state["image_b64"])
+        # Decide VLM mode from query — skin assessment if query mentions wound/skin appearance
+        query_lower = state["user_query"].lower()
+        is_skin_check = any(kw in query_lower for kw in [
+            "wound", "incision", "redness", "bruise", "bruising", "swelling", "swollen",
+            "look normal", "look ok", "skin", "sore", "infected", "pus", "discharge"
+        ])
+        code = build_maya_vlm_code(state["image_b64"], skin_mode=is_skin_check)
+        vlm_label = "skin assessment" if is_skin_check else "prescription/document reader"
         writer({
             "event": "sandbox_spawn",
             "teammate": "maya",
+            "model": "vlm",
             "packages": ["transformers", "torch", "Pillow"],
             "gpu": gpu,
         })
+        print(f"[MAYA] VLM mode: {vlm_label}")
         result = run_in_sandbox(
             code=code, packages=[], image_name="vlm",
             gpu=gpu, timeout=180, on_stdout=stdout_cb, on_stderr=stderr_cb,
         )
 
-    elif needs_ner:
-        code = build_biobert_ner_code(state["user_query"])
+    elif needs_mediapipe:
+        # MediaPipe: wrist/elbow joint-angle analysis (ROM check)
         writer({
             "event": "sandbox_spawn",
             "teammate": "maya",
-            "packages": ["transformers", "torch"],
+            "model": "mediapipe",
+            "packages": ["mediapipe", "opencv-python-headless"],
             "gpu": None,
         })
+        # Extract wrist/elbow PT restrictions from patient context
+        pt_ctx = state.get("patient_context") or {}
+        procedure = pt_ctx.get("patient_profile", {}).get("procedure", "upper extremity surgery")
+        pt_restrictions = [
+            r for r in pt_ctx.get("restrictions", [])
+            if any(kw in r.get("category", "").lower() for kw in ["physical", "wrist", "elbow", "arm"])
+        ]
+        restriction_str = (
+            "; ".join(r["rule"] for r in pt_restrictions) if pt_restrictions
+            else "follow surgeon guidance on range of motion"
+        )
+        # Placeholder — swap in real build_mediapipe_wrist_elbow_code() when ready
         result = run_in_sandbox(
-            code=code, packages=[], image_name="biobert",
-            timeout=120, on_stdout=stdout_cb, on_stderr=stderr_cb,
+            code=(
+                f"print('[Maya] MediaPipe wrist/elbow ROM analysis — procedure: {procedure}')\n"
+                f"print('[Maya] Query: {state[\"user_query\"]}')\n"
+                f"print('[Maya] PT restrictions: {restriction_str}')\n"
+                f"print('[Maya] TODO: invoke MediaPipe pose estimation for wrist/elbow angle measurement')\n"
+                f"print('[Maya] TODO: compare measured ROM against restriction thresholds')\n"
+            ),
+            packages=[], image_name="research",
+            on_stdout=stdout_cb, on_stderr=stderr_cb,
         )
 
-        # Extract medications from BioBERT output for Rex
-        try:
-            ner_json_text = result.stdout.split("[Maya] === RESULTS ===\n")[-1]
-            ner_json_text = ner_json_text.split("[Maya] === END_NER ===")[0].strip()
-            ner_data = json.loads(ner_json_text)
-            extracted_meds = ner_data.get("medications", [])
-            if extracted_meds:
-                existing = set(m.lower() for m in state.get("medications", []))
-                new_meds = state.get("medications", [])[:]
-                for m in extracted_meds:
-                    if m.lower() not in existing:
-                        new_meds.append(m)
-                        existing.add(m.lower())
-                state["_ner_medications"] = new_meds
-        except (json.JSONDecodeError, IndexError):
-            pass
-
-    else:
-        meds_str = " ".join(state["medications"]) if state["medications"] else state["user_query"]
-        query = f"{meds_str} drug interaction clinical"
-        code = build_maya_pubmed_code(query)
+    elif needs_mistral:
+        # Finetuned Mistral: general clinical Q&A
+        # TODO: implement build_mistral_query_code() in lab_tools.py
         writer({
             "event": "sandbox_spawn",
             "teammate": "maya",
-            "packages": ["requests"],
+            "model": "mistral",
+            "packages": [],
+            "gpu": None,
+        })
+        # Placeholder — swap in real code when Mistral sandbox endpoint is wired
+        result = run_in_sandbox(
+            code=(
+                f"print('[Maya] Mistral medical model — query: {state[\"user_query\"]}')\n"
+                f"print('[Maya] TODO: call finetuned Mistral endpoint and return clinical answer')\n"
+            ),
+            packages=[], image_name="research",
+            on_stdout=stdout_cb, on_stderr=stderr_cb,
+        )
+
+    else:
+        # Fallback: should not normally be reached since maya_route guards this
+        writer({
+            "event": "sandbox_spawn",
+            "teammate": "maya",
+            "model": "fallback",
+            "packages": [],
             "gpu": None,
         })
         result = run_in_sandbox(
-            code=code, packages=[], image_name="research",
+            code="print('[Maya] No model selected — check router flags')\n",
+            packages=[], image_name="research",
             on_stdout=stdout_cb, on_stderr=stderr_cb,
         )
 
@@ -426,15 +541,10 @@ def maya_sandbox_node(state: LabState) -> dict:
         "duration_ms": result.duration_ms,
     })
 
-    updates = {
+    return {
         "maya_research": result.stdout,
         "sandbox_outputs": [{"agent": "maya", "stdout": result.stdout, "exit_code": result.exit_code, "duration_ms": result.duration_ms}],
     }
-
-    if "_ner_medications" in state:
-        updates["medications"] = state["_ner_medications"]
-
-    return updates
 
 
 def maya_text_only_node(state: LabState) -> dict:
@@ -466,13 +576,15 @@ def rex_think_node(state: LabState) -> dict:
     meds_str = ", ".join(state["medications"]) if state["medications"] else "unknown"
     maya_ctx = (state.get("maya_research") or "")[:500]
 
+    patient_block = _patient_block(state)
     system_prompt = f"{config['system_prompt']}\n\n{FORMATTING_RULES}"
     user_prompt = (
         f"The user asked: '{state['user_query']}'\n"
         f"Medications: {meds_str}\n"
         f"Maya's research: {maya_ctx}\n"
-        f"You are about to cross-reference these medications against FDA databases. "
-        f"Briefly introduce what you're checking for."
+        + (f"{patient_block}\n" if patient_block else "")
+        + "You are about to cross-reference these medications against FDA databases. "
+        "Briefly introduce what you're checking for, noting any restrictions relevant to this patient."
     )
 
     result = call_llm(system_prompt, user_prompt, config_id="rex")
@@ -491,6 +603,7 @@ def rex_sandbox_node(state: LabState) -> dict:
     writer({
         "event": "sandbox_spawn",
         "teammate": "rex",
+        "model": "fda",
         "packages": ["requests"],
         "gpu": None,
     })
@@ -536,13 +649,15 @@ def rex_text_only_node(state: LabState) -> dict:
 
     meds_str = ", ".join(state["medications"]) if state["medications"] else "unknown"
     maya_ctx = (state.get("maya_research") or "")[:500]
+    patient_block = _patient_block(state)
 
     system_prompt = f"{config['system_prompt']}\n\n{FORMATTING_RULES}"
     user_prompt = (
         f"The user asked: '{state['user_query']}'\n"
         f"Medications: {meds_str}\n"
         f"Maya's research: {maya_ctx}\n"
-        f"Provide a brief safety assessment based on your knowledge."
+        + (f"{patient_block}\n" if patient_block else "")
+        + "Provide a brief safety assessment, flagging any concerns specific to this patient's situation."
     )
 
     result = call_llm(system_prompt, user_prompt, config_id="rex")
@@ -561,6 +676,7 @@ def sol_think_node(state: LabState) -> dict:
     meds_str = ", ".join(state["medications"]) if state["medications"] else "unknown"
     maya_ctx = (state.get("maya_research") or "")[:300]
     rex_ctx = (state.get("rex_interactions") or "")[:300]
+    patient_block = _patient_block(state)
 
     system_prompt = f"{config['system_prompt']}\n\n{FORMATTING_RULES}"
     user_prompt = (
@@ -568,8 +684,9 @@ def sol_think_node(state: LabState) -> dict:
         f"Medications: {meds_str}\n"
         f"Maya's findings: {maya_ctx}\n"
         f"Rex's safety analysis: {rex_ctx}\n"
-        f"You are about to generate a plain-language summary. "
-        f"Briefly introduce what you'll put together."
+        + (f"{patient_block}\n" if patient_block else "")
+        + "You are about to generate a plain-language summary tailored to this patient's situation. "
+        "Briefly introduce what you'll put together."
     )
 
     result = call_llm(system_prompt, user_prompt, config_id="sol")
@@ -591,6 +708,7 @@ def sol_sandbox_node(state: LabState) -> dict:
     writer({
         "event": "sandbox_spawn",
         "teammate": "sol",
+        "model": "viz",
         "packages": ["flask", "jinja2", "matplotlib"],
         "gpu": None,
     })
@@ -639,6 +757,7 @@ def sol_text_only_node(state: LabState) -> dict:
     meds_str = ", ".join(state["medications"]) if state["medications"] else "unknown"
     maya_ctx = (state.get("maya_research") or "")[:500]
     rex_ctx = (state.get("rex_interactions") or "")[:500]
+    patient_block = _patient_block(state)
 
     system_prompt = f"{config['system_prompt']}\n\n{FORMATTING_RULES}"
     user_prompt = (
@@ -646,7 +765,8 @@ def sol_text_only_node(state: LabState) -> dict:
         f"Medications: {meds_str}\n"
         f"Maya's findings: {maya_ctx}\n"
         f"Rex's safety analysis: {rex_ctx}\n"
-        f"Provide a concise plain-language summary."
+        + (f"{patient_block}\n" if patient_block else "")
+        + "Provide a concise plain-language summary tailored to this patient's specific procedure and restrictions."
     )
 
     result = call_llm(system_prompt, user_prompt, config_id="sol")
@@ -669,12 +789,61 @@ def synthesize_node(state: LabState) -> dict:
     return {"synthesis": "\n\n".join(summary_parts)}
 
 
+def warning_scan_node(state: LabState) -> dict:
+    """Subroutine: keyword-scan conversation text against patient warning signs.
+
+    Runs after synthesis — no LLM call, pure keyword matching against
+    patient_context.warning_signs[].keywords. Emits warning_flagged SSE
+    events that the frontend appends to the WarningsPanel (starts empty).
+    """
+    writer = get_stream_writer()
+
+    ctx = state.get("patient_context") or {}
+    warning_signs = ctx.get("warning_signs", [])
+    if not warning_signs:
+        return {}
+
+    # Combine all conversation text into one lowercase blob
+    combined = " ".join(filter(None, [
+        state.get("user_query", ""),
+        state.get("maya_research") or "",
+        state.get("rex_interactions") or "",
+        state.get("sol_summary") or "",
+    ])).lower()
+
+    for w in warning_signs:
+        keywords = w.get("keywords", [])
+        if not keywords:
+            continue
+        matched = [kw for kw in keywords if kw.lower() in combined]
+        if matched:
+            severity = (
+                "urgent"
+                if re.search(r"emergency room|call 911|immediately", w.get("action", ""), re.I)
+                else "watch"
+            )
+            print(f"[WARNING_SCAN] Flagging '{w['symptom']}' (severity={severity}, matched={matched})")
+            writer({
+                "event": "warning_flagged",
+                "symptom": w["symptom"],
+                "severity": severity,
+                "agent": "sol",
+            })
+
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # Conditional Edge Functions
 # ---------------------------------------------------------------------------
 
 def maya_route(state: LabState) -> str:
-    return "maya_sandbox" if state.get("needs_vlm") or state.get("needs_ner") or state.get("needs_fda_check") else "maya_text_only"
+    needs_compute = (
+        state.get("needs_vlm")        # VLM prescription reader
+        or state.get("needs_mediapipe")  # MediaPipe PT advisor
+        or state.get("needs_mistral")    # Finetuned Mistral clinical Q&A
+    )
+    return "maya_sandbox" if needs_compute else "maya_text_only"
 
 
 def rex_route(state: LabState) -> str:
@@ -703,6 +872,7 @@ graph_builder.add_node("sol_think", sol_think_node)
 graph_builder.add_node("sol_sandbox", sol_sandbox_node)
 graph_builder.add_node("sol_text_only", sol_text_only_node)
 graph_builder.add_node("synthesize", synthesize_node)
+graph_builder.add_node("warning_scan", warning_scan_node)
 
 # Edges
 graph_builder.add_edge(START, "router")
@@ -720,7 +890,8 @@ graph_builder.add_conditional_edges("sol_think", sol_route)
 graph_builder.add_edge("sol_sandbox", "synthesize")
 graph_builder.add_edge("sol_text_only", "synthesize")
 
-graph_builder.add_edge("synthesize", END)
+graph_builder.add_edge("synthesize", "warning_scan")
+graph_builder.add_edge("warning_scan", END)
 
 # Compile
 compiled_graph = graph_builder.compile()

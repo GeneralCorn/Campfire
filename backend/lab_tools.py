@@ -377,12 +377,20 @@ print("[Maya] Biomedical entity extraction complete.")
 """
 
 
-def build_maya_vlm_code(image_b64: str) -> str:
+def build_maya_vlm_code(image_b64: str, skin_mode: bool = False) -> str:
     """
-    Python code for Maya's GPU sandbox: run Florence-2 VLM on a prescription image.
-    Uses pre-built VLM_IMAGE with model already downloaded.
+    Python code for Maya's GPU sandbox: run Florence-2 VLM on an image.
+    - skin_mode=False (default): OCR + caption for prescription/document reading
+    - skin_mode=True: detailed caption + object detection for wound/skin assessment
     Requires: image_name="vlm", gpu=pick_gpu()
     """
+    if skin_mode:
+        tasks_code = '["<DETAILED_CAPTION>", "<MORE_DETAILED_CAPTION>", "<OPEN_VOCABULARY_DETECTION>"]'
+        mode_label = "wound/skin visual assessment"
+    else:
+        tasks_code = '["<OCR>", "<DETAILED_CAPTION>", "<MORE_DETAILED_CAPTION>"]'
+        mode_label = "prescription/document OCR"
+
     return f"""
 import torch
 import base64
@@ -391,7 +399,7 @@ import json
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForVision2Seq
 
-print("[Maya] Loading Florence-2 vision-language model...")
+print("[Maya] Loading Florence-2 VLM for {mode_label}...")
 processor = AutoProcessor.from_pretrained("microsoft/Florence-2-base")
 model = AutoModelForVision2Seq.from_pretrained("microsoft/Florence-2-base")
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -399,13 +407,13 @@ model = model.to(device)
 print(f"[Maya] Model loaded on {{device}}")
 
 # Decode the base64 image
-print("[Maya] Decoding prescription image...")
+print("[Maya] Decoding image...")
 image_bytes = base64.b64decode("{image_b64}")
 image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 print(f"[Maya] Image size: {{image.size}}")
 
-# Run OCR + detailed captioning
-tasks = ["<OCR>", "<DETAILED_CAPTION>", "<MORE_DETAILED_CAPTION>"]
+# Run VLM tasks
+tasks = {tasks_code}
 results = {{}}
 
 for task in tasks:
@@ -425,7 +433,6 @@ for task in tasks:
 
 print()
 print("[Maya] === VLM_RESULTS ===")
-# Flatten results for JSON serialization
 output = {{}}
 for task, result in results.items():
     if isinstance(result, dict):

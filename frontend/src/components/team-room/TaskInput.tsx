@@ -94,12 +94,12 @@ export function TaskInput() {
     <div className="shrink-0 px-4 pb-4 pt-2">
       {/* Task bar when streaming */}
       {(isStreaming || demoPlaying) && (
-        <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded bg-surface-3/50 text-[11px] font-mono text-text-dim">
-          <span className="h-1.5 w-1.5 rounded-full bg-broadcast animate-live-dot" />
+        <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded bg-[#F1F5F9] text-[11px] font-mono text-[#64748B]">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#0891B2] animate-live-dot" />
           <span className="flex-1 truncate">Team is working...</span>
           <button
             onClick={interrupt}
-            className="flex items-center gap-1 px-2 py-0.5 rounded bg-danger/15 text-danger hover:bg-danger/25 transition-colors cursor-pointer text-[10px] font-bold"
+            className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#FEF2F2] text-[#DC2626] hover:bg-[#FEE2E2] transition-colors cursor-pointer text-[10px] font-bold"
           >
             <Square size={8} />
             STOP
@@ -108,14 +108,14 @@ export function TaskInput() {
       )}
 
       {/* Input bar */}
-      <div className="flex items-end gap-2 rounded-lg bg-white/[0.04] border border-white/[0.06] px-3 py-2 focus-within:border-white/[0.12] transition-colors">
+      <div className="flex items-end gap-2 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] px-3 py-2 focus-within:border-[#CBD5E1] transition-colors">
         <button
           onClick={toggleRecording}
           disabled={isStreaming || transcribing}
           className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors cursor-pointer shrink-0 ${
             recording
-              ? "bg-danger/20 text-danger animate-pulse"
-              : "bg-white/[0.04] text-text-dim hover:text-text-secondary hover:bg-white/[0.08]"
+              ? "bg-[#FEF2F2] text-[#DC2626] animate-pulse"
+              : "bg-[#F1F5F9] text-[#94A3B8] hover:text-[#64748B] hover:bg-[#E2E8F0]"
           } disabled:opacity-30 disabled:cursor-not-allowed`}
           title={recording ? "Stop recording" : "Voice input"}
         >
@@ -130,15 +130,15 @@ export function TaskInput() {
             e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Give your team a task..."
+          placeholder="Ask about meds, warning signs, recovery steps, or discharge instructions…"
           rows={1}
-          className="flex-1 resize-none bg-transparent text-sm text-text-primary placeholder:text-text-dim outline-none min-h-[20px] max-h-[120px]"
+          className="flex-1 resize-none bg-transparent text-sm text-[#1E293B] placeholder:text-[#94A3B8] outline-none min-h-[20px] max-h-[120px]"
           disabled={isStreaming || transcribing}
         />
         <button
           onClick={handleSubmit}
           disabled={!input.trim() || isStreaming || transcribing}
-          className="flex h-8 w-8 items-center justify-center rounded-md bg-broadcast/20 text-broadcast hover:bg-broadcast/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer shrink-0"
+          className="flex h-8 w-8 items-center justify-center rounded-md bg-[#0891B2] text-white hover:bg-[#0E7490] disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer shrink-0"
         >
           <Send size={16} />
         </button>

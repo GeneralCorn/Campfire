@@ -29,16 +29,16 @@ export function SandboxView() {
             </div>
           ) : (
             <div className="max-w-2xl mx-auto space-y-4">
-              {artifactSections.map((section) => {
-                const t = teammates[section.authorId];
+              {artifactSections.map((section, i) => {
+                const t = section.authorId ? teammates[section.authorId] : undefined;
                 return (
                   <div
-                    key={section.id}
+                    key={section.id ?? i}
                     className="rounded-lg bg-white/[0.03] border border-white/[0.05] p-4"
-                    style={{
+                    style={t ? {
                       borderLeft: `3px solid ${t.colorHex}30`,
                       boxShadow: `inset 2px 0 8px ${t.colorHex}08`,
-                    }}
+                    } : {}}
                   >
                     <h3 className="text-sm font-bold text-text-primary mb-2 uppercase tracking-[0.04em]">
                       {section.heading}
@@ -46,10 +46,12 @@ export function SandboxView() {
                     <div className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
                       {section.content}
                     </div>
-                    <div className="mt-2 text-[9px] font-mono text-text-dim">
-                      Last updated by{" "}
-                      <span style={{ color: t.colorHex }}>{t.name}</span>
-                    </div>
+                    {t && (
+                      <div className="mt-2 text-[9px] font-mono text-text-dim">
+                        Last updated by{" "}
+                        <span style={{ color: t.colorHex }}>{t.name}</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
