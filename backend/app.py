@@ -12,9 +12,10 @@ import modal
 
 app = modal.App("agentfm")
 
-image = modal.Image.debian_slim(python_version="3.11").pip_install(
-    "httpx",
-    "supermemory",
+image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install("httpx", "supermemory", "fastapi[standard]")
+    .add_local_python_source("config", "memory")
 )
 
 
@@ -199,7 +200,7 @@ async def get_memories(teammate_tag: str = None) -> list:
     secrets=[modal.Secret.from_name("campfire-secrets")],
     timeout=120,
 )
-@modal.web_endpoint(method="POST")
+@modal.fastapi_endpoint(method="POST")
 async def serve(body: dict):
     """Web endpoint called by the Next.js frontend API routes."""
     from config import TEAMMATE_CONFIGS

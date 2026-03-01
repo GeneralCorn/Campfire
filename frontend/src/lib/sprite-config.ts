@@ -20,20 +20,20 @@ export interface AgentSpriteConfig {
 export const SPRITE_RESOLUTION = 64;
 
 export const agentSprites: Record<string, AgentSpriteConfig> = {
-  mika: {
-    id: "mika",
-    displayName: "Mika",
-    base: "tiny cute teal robot girl, round head, small antenna, glowing cyan eyes, teal body",
+  maya: {
+    id: "maya",
+    displayName: "Maya",
+    base: "tiny cute teal robot girl, round head, small antenna, glowing cyan eyes, teal body, medical cross emblem",
     states: {
       idle: {
         frames: 4,
         frameDuration: 250,
         loop: "pingpong",
         prompts: [
-          "browsing tiny holographic screen, antenna left",
-          "screen dimmed, antenna centered, eyes half-closed",
-          "swiping on screen, antenna right",
-          "screen bright, antenna centered, eyes wide curious",
+          "browsing tiny holographic medical chart, antenna left",
+          "chart dimmed, antenna centered, eyes half-closed",
+          "swiping on chart, antenna right",
+          "chart bright, antenna centered, eyes wide curious",
         ],
       },
       thinking: {
@@ -43,7 +43,7 @@ export const agentSprites: Record<string, AgentSpriteConfig> = {
         prompts: [
           "typing rapidly on floating keyboard, antenna dim",
           "typing faster, antenna bright, eyes focused",
-          "paused typing, antenna sparking, squinting at code",
+          "paused typing, antenna sparking, squinting at data",
           "eureka moment, antenna pulsing, lightbulb above head",
         ],
       },
@@ -93,10 +93,10 @@ export const agentSprites: Record<string, AgentSpriteConfig> = {
       },
     },
   },
-  rune: {
-    id: "rune",
-    displayName: "Rune",
-    base: "small angular red robot, sharp visor, mechanical arms, coral red body, tough looking",
+  rex: {
+    id: "rex",
+    displayName: "Rex",
+    base: "small angular red robot, sharp visor, mechanical arms, coral red body, caution symbol, tough looking",
     states: {
       idle: {
         frames: 4,
@@ -166,9 +166,9 @@ export const agentSprites: Record<string, AgentSpriteConfig> = {
       },
     },
   },
-  sage: {
-    id: "sage",
-    displayName: "Sage",
+  sol: {
+    id: "sol",
+    displayName: "Sol",
     base: "round wise gold robot, single large yellow lens eye, small floating orbs, gold body, calm",
     states: {
       idle: {

@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Send, Square, Mic, MicOff } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";
-import { useDebate } from "@/hooks/useWebSocket";
+import { useTeamChat } from "@/hooks/useSSE";
 
 export function TaskInput() {
   const [input, setInput] = useState("");
@@ -14,7 +14,7 @@ export function TaskInput() {
   const chunksRef = useRef<Blob[]>([]);
   const isStreaming = useAppStore((s) => s.isStreaming);
   const demoPlaying = useAppStore((s) => s.demoPlaying);
-  const { startDebate, interrupt } = useDebate();
+  const { sendTask, interrupt } = useTeamChat();
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
@@ -26,9 +26,17 @@ export function TaskInput() {
       textareaRef.current.style.height = "auto";
     }
 
-    // startDebate adds the user message and opens the WebSocket
-    startDebate(text);
-  }, [input, isStreaming, startDebate]);
+    // Add user message to whichever channel is active
+    useAppStore.getState().addMessage({
+      id: `user-${Date.now()}`,
+      sender: "user",
+      content: text,
+      timestamp: Date.now(),
+      channel: useAppStore.getState().activeChannel,
+    });
+
+    sendTask(text, []);
+  }, [input, isStreaming, sendTask]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {

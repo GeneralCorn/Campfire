@@ -1,12 +1,10 @@
-export type TeammateId = "mika" | "rune" | "sage";
+export type TeammateId = "maya" | "rex" | "sol";
 export type TeammateState = "idle" | "thinking" | "talking" | "interrupted" | "reacting" | "agreeing";
 export type ChannelId =
   | "team-room"
-  | "hangout"
   | "sandbox"
   | "memories"
-  | "debate"
-  | "debrief";
+  | "debate";
 
 export type AgentId = "scout" | "critic" | "synthesizer";
 
@@ -87,4 +85,17 @@ export interface ArtifactSection {
   content: string;
   authorId: TeammateId;
   timestamp: number;
+}
+
+// Pipeline visualization
+export type PipelineNodeId = "router" | "maya" | "rex" | "sol" | "synthesize";
+export type PipelineNodeStatus = "pending" | "running" | "sandbox" | "done";
+export interface PipelineNode {
+  id: PipelineNodeId;
+  status: PipelineNodeStatus;
+  label: string;
+  detail?: string;
+  gpu?: string | null;
+  startedAt?: number;
+  completedAt?: number;
 }

@@ -11,24 +11,24 @@ export interface Channel {
 export const channels: Channel[] = [
   {
     id: "team-room",
-    name: "team-room",
+    name: "rounds",
     type: "voice",
     section: "VOICE CHANNELS",
-    description: "Your AI team, working together",
+    description: "Medical team rounds — Maya, Rex, and Sol working together",
   },
   {
     id: "hangout",
-    name: "hangout",
+    name: "consult",
     type: "voice",
     section: "VOICE CHANNELS",
-    description: "Voice chat — interrogate any agent about its decisions",
+    description: "Voice chat — ask any agent about its reasoning",
   },
   {
     id: "debate",
-    name: "debate-room",
+    name: "lab",
     type: "voice",
-    section: "DEBATE",
-    description: "Watch Scout, Critic and Synthesizer argue it out",
+    section: "WORKSPACE",
+    description: "Full medical pipeline with live container graph",
   },
   {
     id: "debrief",
@@ -39,16 +39,16 @@ export const channels: Channel[] = [
   },
   {
     id: "sandbox",
-    name: "sandbox",
+    name: "artifacts",
     type: "text",
     section: "WORKSPACE",
-    description: "Live view of task being executed",
+    description: "Documents and image upload for VLM analysis",
   },
   {
     id: "memories",
-    name: "memories",
+    name: "history",
     type: "text",
     section: "INSIGHTS",
-    description: "Visual graph of team memories",
+    description: "Session memory and medication history",
   },
 ];

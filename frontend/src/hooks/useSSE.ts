@@ -3,7 +3,7 @@
 import { useCallback, useRef } from "react";
 import { useAppStore } from "@/stores/useAppStore";
 import { initAudio, playChunk, stopAll } from "@/lib/audio-player";
-import type { TeammateId, TeammateState } from "@/types";
+import type { TeammateId, TeammateState, PipelineNodeId, ChannelId } from "@/types";
 
 /** Map sentiment string from LLM → sprite state for richer animations. */
 function sentimentToState(sentiment: string | undefined): TeammateState {
@@ -29,11 +29,15 @@ export function useTeamChat() {
   const addSandboxEntry = useAppStore((s) => s.addSandboxEntry);
   const addMemory = useAppStore((s) => s.addMemory);
   const setCurrentSessionId = useAppStore((s) => s.setCurrentSessionId);
+  const setPipelineNodeStatus = useAppStore((s) => s.setPipelineNodeStatus);
+  const resetPipeline = useAppStore((s) => s.resetPipeline);
 
   // Track current streaming message per teammate
   const currentMsgIds = useRef<Record<string, string>>({});
   // Track sentiment per teammate for sprite state selection
   const currentSentiment = useRef<Record<string, string>>({});
+  // Which channel initiated the current task (so messages go to the right place)
+  const activeChannelRef = useRef<ChannelId>("team-room");
   const memCounter = useRef(0);
 
   const sendTask = useCallback(
@@ -44,20 +48,36 @@ export function useTeamChat() {
 
       setIsStreaming(true);
       setIsLive(true);
+      resetPipeline();
+
+      // Capture which channel the user is on so messages go there
+      activeChannelRef.current = useAppStore.getState().activeChannel;
 
       // Generate session ID for debrief memory queries
       const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setCurrentSessionId(sessionId);
 
+      // Grab and clear any pending image
+      const image = useAppStore.getState().pendingImage;
+      if (image) useAppStore.getState().setPendingImage(null);
+
       try {
         const response = await fetch("/api/team-chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ task, history, mode: "auto" }),
+          body: JSON.stringify({ task, history, mode: "auto", ...(image ? { image } : {}) }),
           signal: abortRef.current.signal,
         });
 
         if (!response.ok || !response.body) {
+          console.error("[SSE] Backend returned", response.status);
+          addMessage({
+            id: `err-${Date.now()}`,
+            sender: "system",
+            content: `Backend error (${response.status}): Could not reach the pipeline. Is the backend running on port 8001?`,
+            timestamp: Date.now(),
+            channel: activeChannelRef.current,
+          });
           setIsStreaming(false);
           return;
         }
@@ -78,15 +98,23 @@ export function useTeamChat() {
             if (!line.startsWith("data: ")) continue;
             try {
               const data = JSON.parse(line.slice(6));
+              console.log("[SSE]", data.event, data.teammate || "", data);
               handleEvent(data);
-            } catch {
-              // Skip malformed events
+            } catch (parseErr) {
+              console.warn("[SSE] Malformed event:", line.slice(0, 200), parseErr);
             }
           }
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           console.error("SSE error:", err);
+          addMessage({
+            id: `err-${Date.now()}`,
+            sender: "system",
+            content: `Connection error: ${(err as Error).message}`,
+            timestamp: Date.now(),
+            channel: activeChannelRef.current,
+          });
         }
       } finally {
         setIsStreaming(false);
@@ -101,8 +129,20 @@ export function useTeamChat() {
     const teammate = data.teammate as TeammateId | undefined;
 
     switch (data.event) {
+      case "router_plan": {
+        setPipelineNodeStatus("router", "done", data.plan as string | undefined);
+        break;
+      }
+
       case "thinking": {
-        if (teammate) setTeammateState(teammate, "thinking");
+        if (teammate) {
+          setTeammateState(teammate, "thinking");
+          // Update pipeline node if teammate is a known node
+          const nodeId = teammate as PipelineNodeId;
+          if (nodeId === "maya" || nodeId === "rex" || nodeId === "sol") {
+            setPipelineNodeStatus(nodeId, "running");
+          }
+        }
         break;
       }
 
@@ -148,7 +188,7 @@ export function useTeamChat() {
           confidence: data.confidence as number | undefined,
           sentiment: sentiment,
           timestamp: Date.now(),
-          channel: "team-room",
+          channel: activeChannelRef.current,
           isStreaming: true,
         });
         break;
@@ -170,7 +210,7 @@ export function useTeamChat() {
             sender: teammate,
             content: text + " ",
             timestamp: Date.now(),
-            channel: "team-room",
+            channel: activeChannelRef.current,
             isStreaming: true,
           });
         } else {
@@ -189,6 +229,53 @@ export function useTeamChat() {
         const audio = data.audio as string | undefined;
         if (audio) {
           playChunk(audio);
+        }
+        break;
+      }
+
+      case "sandbox_spawn": {
+        if (teammate) {
+          const nodeId = teammate as PipelineNodeId;
+          if (nodeId === "maya" || nodeId === "rex" || nodeId === "sol") {
+            const detail = [
+              data.packages ? (data.packages as string[]).join(", ") : "",
+              data.gpu ? `GPU: ${data.gpu}` : "",
+            ].filter(Boolean).join(" · ");
+            setPipelineNodeStatus(nodeId, "sandbox", detail || undefined);
+          }
+          addSandboxEntry({
+            id: `sb-spawn-${Date.now()}-${Math.random()}`,
+            teammateId: teammate,
+            type: "log",
+            text: `[${teammate}] Sandbox provisioning...${data.packages ? ` (${(data.packages as string[]).join(", ")})` : ""}${data.gpu ? ` [GPU: ${data.gpu}]` : ""}`,
+            timestamp: Date.now(),
+          });
+        }
+        break;
+      }
+
+      case "sandbox_output": {
+        if (teammate) {
+          addSandboxEntry({
+            id: `sb-out-${Date.now()}-${Math.random()}`,
+            teammateId: teammate,
+            type: "log",
+            text: data.line as string,
+            timestamp: Date.now(),
+          });
+        }
+        break;
+      }
+
+      case "sandbox_complete": {
+        if (teammate) {
+          addSandboxEntry({
+            id: `sb-done-${Date.now()}-${Math.random()}`,
+            teammateId: teammate,
+            type: "flag",
+            text: `[${teammate}] Sandbox done (exit ${data.exit_code}, ${((data.duration_ms as number) / 1000).toFixed(1)}s)`,
+            timestamp: Date.now(),
+          });
         }
         break;
       }
@@ -215,11 +302,37 @@ export function useTeamChat() {
           }
           delete currentSentiment.current[teammate];
           setTeammateState(teammate, "idle");
+          // Mark pipeline node done
+          const nodeId = teammate as PipelineNodeId;
+          if (nodeId === "maya" || nodeId === "rex" || nodeId === "sol") {
+            setPipelineNodeStatus(nodeId, "done");
+          }
         }
         break;
       }
 
+      case "error": {
+        console.error("[Pipeline error]", data.message);
+        addMessage({
+          id: `err-${Date.now()}`,
+          sender: "system",
+          content: `Pipeline error: ${data.message}`,
+          timestamp: Date.now(),
+          channel: activeChannelRef.current,
+        });
+        // Show error in pipeline activity log so it's visible
+        addSandboxEntry({
+          id: `sb-err-${Date.now()}-${Math.random()}`,
+          teammateId: "system" as TeammateId,
+          type: "flag",
+          text: `ERROR: ${data.message}`,
+          timestamp: Date.now(),
+        });
+        break;
+      }
+
       case "complete": {
+        setPipelineNodeStatus("synthesize", "done");
         resetAllTeammateStates();
         setIsStreaming(false);
         break;

@@ -2,30 +2,29 @@
 
 import { useAppStore } from "@/stores/useAppStore";
 import { teammates } from "@/lib/teammates";
-import { FileText, Activity } from "lucide-react";
-import type { TeammateId } from "@/types";
+import { FileText } from "lucide-react";
+import { ImageUploadPanel } from "./ImageUploadPanel";
 
 export function SandboxView() {
   const artifactSections = useAppStore((s) => s.artifactSections);
-  const sandboxEntries = useAppStore((s) => s.sandboxEntries);
 
   return (
     <div className="flex h-full">
-      {/* Document area */}
+      {/* Document / artifacts area */}
       <div className="flex-1 flex flex-col border-r border-white/[0.04]">
         <div className="flex items-center gap-2 px-4 h-12 border-b border-white/[0.06] shrink-0">
           <FileText size={18} className="text-text-dim" />
-          <span className="font-bold text-sm">sandbox</span>
-          <span className="text-xs text-text-dim">Live view of task being executed</span>
+          <span className="font-bold text-sm">artifacts</span>
+          <span className="text-xs text-text-dim">Documents and write-ups from the team</span>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
           {artifactSections.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <FileText size={40} className="text-text-dim/20 mb-3" />
-              <p className="text-sm text-text-secondary">No active document</p>
+              <p className="text-sm text-text-secondary">No artifacts yet</p>
               <p className="text-xs text-text-dim mt-1">
-                Start a task in the team room to see the team&apos;s work here
+                Start a task in rounds to see the team&apos;s write-ups here
               </p>
             </div>
           ) : (
@@ -59,54 +58,10 @@ export function SandboxView() {
         </div>
       </div>
 
-      {/* Activity log */}
+      {/* Image upload panel */}
       <div className="w-[300px] flex flex-col shrink-0">
-        <div className="flex items-center gap-2 px-4 h-12 border-b border-white/[0.06]">
-          <Activity size={14} className="text-text-dim" />
-          <span className="text-xs font-mono text-text-dim uppercase tracking-[0.08em]">
-            Activity Log
-          </span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-3">
-          {sandboxEntries.length === 0 ? (
-            <p className="text-xs text-text-dim italic p-2">No activity yet</p>
-          ) : (
-            <div className="space-y-1">
-              {sandboxEntries.map((entry) => {
-                const t = teammates[entry.teammateId as TeammateId];
-                return (
-                  <div key={entry.id} className="flex items-start gap-2 py-1 text-[11px]">
-                    <span className="font-mono text-text-dim shrink-0 w-12">
-                      {formatTime(entry.timestamp)}
-                    </span>
-                    <span
-                      className="font-mono font-bold shrink-0 w-10"
-                      style={{ color: t?.colorHex }}
-                    >
-                      {t?.name}
-                    </span>
-                    <span className="inline-flex items-center px-1.5 py-0 rounded text-[9px] font-mono font-bold bg-white/[0.05] text-text-secondary uppercase shrink-0">
-                      {entry.type}
-                    </span>
-                    <span className="text-text-secondary truncate">
-                      {entry.text}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <ImageUploadPanel />
       </div>
     </div>
   );
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  });
 }

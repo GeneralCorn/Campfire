@@ -6,8 +6,8 @@ import re
 import base64
 from typing import Dict, Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -21,9 +21,9 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env.local"))
 # Configuration
 # ==============================================================================
 
-# LLM
-MODEL_NAME = os.getenv("MODEL_NAME")
-MODAL_URL = os.getenv("MODAL_URL")
+# LLM — Anthropic (Claude)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
 # APIs
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
@@ -146,14 +146,16 @@ def parse_llm_response(raw_text: str) -> dict:
     }
 
 
-async def call_modal_llm(agent_id: str, topic: str, conversation_history: str) -> dict:
+async def call_llm(agent_id: str, topic: str, conversation_history: str) -> dict:
     """
-    Calls the vLLM engine running on Modal with the strict system prompts.
+    Calls the Anthropic API with the strict system prompts.
     """
+    import anthropic
+
     print(f"\n[LLM] Requesting turn for {agent_id.upper()}...")
-    
+
     agent_config = AGENTS[agent_id]
-    
+
     # Strict formatting rules
     formatting_rules = (
         "CRITICAL RULES:\n"
@@ -162,40 +164,32 @@ async def call_modal_llm(agent_id: str, topic: str, conversation_history: str) -
         '{"spoken_message": "Exactly 1 or 2 sentences MAX. Be extremely crisp.", "confidence": 0.9, "sentiment": "analytical"}\n'
         "3. The 'spoken_message' MUST NOT contain any markdown, asterisks, or bullet points. Output natural spoken English only. NO yapping."
     )
-    
+
     system_prompt = f"{agent_config['system_prompt']}\n\n{formatting_rules}"
-    
+
     # Build prompt context
     user_prompt = f"The debate topic is: '{topic}'.\n\n"
     if conversation_history:
         user_prompt += f"Here is the conversation so far:\n{conversation_history}\n\n"
     user_prompt += f"It is your turn to speak as the {agent_id.capitalize()}."
 
-    url = f"{MODAL_URL}/v1/chat/completions"
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.7,
-        "max_tokens": 2048,
-    }
-    
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(url, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        raw_text = data["choices"][0]["message"]["content"]
-        
-        return parse_llm_response(raw_text)
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    response = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=2048,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    raw_text = response.content[0].text
+    return parse_llm_response(raw_text)
 
 
-async def call_modal_debrief_llm(agent_name: str, supermemory_context: str, user_question: str) -> dict:
+async def call_debrief_llm(agent_name: str, supermemory_context: str, user_question: str) -> dict:
     """
-    Calls vLLM on Modal with the debrief system prompt.
-    NOTE: set keep_warm=1 on the Modal function to avoid cold starts!
+    Calls Anthropic API with the debrief system prompt.
     """
+    import anthropic
+
     system_prompt = f"""You are {agent_name.capitalize()}, an AI analyst who just finished a live debate. You have access to your memory of what you said and thought during the debate.
 
 Here is your memory from the debate:
@@ -221,24 +215,15 @@ CRITICAL RULES:
 {{"spoken_message": "The actual words you say aloud", "confidence": 0.85, "sentiment": "analytical"}}
 """
 
-    url = f"{MODAL_URL}/v1/chat/completions"
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Question from the user: '{user_question}'"}
-        ],
-        "temperature": 0.7,
-        "max_tokens": 2048,
-    }
-    
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(url, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        raw_text = data["choices"][0]["message"]["content"]
-        
-        return parse_llm_response(raw_text)
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    response = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=2048,
+        system=system_prompt,
+        messages=[{"role": "user", "content": f"Question from the user: '{user_question}'"}],
+    )
+    raw_text = response.content[0].text
+    return parse_llm_response(raw_text)
 
 
 async def query_debrief_memory(session_id: str, target_agent: str, question: str) -> str:
@@ -442,7 +427,7 @@ async def websocket_debate_endpoint(websocket: WebSocket):
             
             # 1. Call LLM (Modal API)
             try:
-                parsed_response = await call_modal_llm(agent_id, topic, conversation_history)
+                parsed_response = await call_llm(agent_id, topic, conversation_history)
             except Exception as e:
                 error_msg = f"LLM Failure for {agent_id}: {str(e)}"
                 print(f"[Error] {error_msg}")
@@ -584,7 +569,7 @@ async def websocket_debrief_endpoint(websocket: WebSocket, session_id: str):
             # 3. Call DeepSeek vLLM
             agent_name = target_agent if target_agent != "all" else "synthesizer" 
             try:
-                parsed_response = await call_modal_debrief_llm(agent_name, context_block, question)
+                parsed_response = await call_debrief_llm(agent_name, context_block, question)
             except Exception as e:
                 error_msg = f"LLM Failure during debrief: {e}"
                 print(f"[Error] {error_msg}")
@@ -638,6 +623,99 @@ async def debug_memories(session_id: str):
     async with httpx.AsyncClient() as client:
         resp = await client.get(url, headers=headers)
         return resp.json()
+
+
+# ==============================================================================
+# MEDICAL LAB (LangGraph + Modal Sandboxes)
+# ==============================================================================
+
+@app.post("/api/lab/run")
+async def lab_run(request: Request):
+    """SSE endpoint for the Medical Lab page. Runs LangGraph graph with Modal Sandboxes."""
+    import asyncio
+    import queue
+    import threading
+    from lab_graph import compiled_graph
+
+    body = await request.json()
+    query = body.get("query", "")
+    medications = body.get("medications", [])
+    image_b64 = body.get("image", None)
+
+    async def event_stream():
+        session_id = str(uuid.uuid4())
+        yield f"data: {json.dumps({'event': 'session_start', 'session_id': session_id})}\n\n"
+
+        initial_state = {
+            "user_query": query,
+            "medications": medications,
+            "has_image": image_b64 is not None,
+            "image_b64": image_b64,
+            "needs_vlm": False,
+            "needs_ner": False,
+            "needs_fda_check": False,
+            "needs_visualization": False,
+            "gpu_tier": None,
+            "maya_research": None,
+            "rex_interactions": None,
+            "sol_summary": None,
+            "sandbox_outputs": [],
+            "synthesis": None,
+        }
+
+        # Run sync graph in a thread, bridge via queue
+        q: queue.Queue = queue.Queue()
+        _DONE = object()
+        _ERROR = object()
+
+        def run_graph():
+            try:
+                for chunk in compiled_graph.stream(
+                    initial_state,
+                    stream_mode="custom",
+                ):
+                    print(f"[GRAPH] chunk: {str(chunk)[:120]}")
+                    q.put(chunk)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                q.put({"event": "error", "message": str(e)})
+                q.put(_ERROR)
+            finally:
+                print("[GRAPH] stream ended")
+                q.put(_DONE)
+
+        thread = threading.Thread(target=run_graph, daemon=True)
+        thread.start()
+
+        had_error = False
+        while True:
+            # Poll queue without blocking the event loop
+            try:
+                chunk = q.get(timeout=0.1)
+            except queue.Empty:
+                await asyncio.sleep(0.05)
+                continue
+
+            if chunk is _DONE:
+                break
+            if chunk is _ERROR:
+                had_error = True
+                continue
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+        # Only emit complete if the graph finished successfully
+        if not had_error:
+            yield f"data: {json.dumps({'event': 'complete'})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # To run this file directly for simple tests:

@@ -1,6 +1,6 @@
 /**
  * Hangout API route — 1:1 conversation with a single teammate.
- * Same two-layer pattern as team-chat but only one teammate responds.
+ * Uses Anthropic API (Claude) for LLM responses and ElevenLabs for TTS.
  *
  * Debrief mode: If a sessionId is provided, queries Supermemory for
  * session-scoped memories and injects them into the system prompt,
@@ -9,20 +9,27 @@
 
 import { NextRequest } from "next/server";
 import WebSocket from "ws";
+import Anthropic from "@anthropic-ai/sdk";
 
-const MODAL_ENDPOINT = process.env.MODAL_ENDPOINT_URL || "";
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || "";
 const SUPERMEMORY_API_KEY = process.env.SUPERMEMORY_API_KEY || "";
 
 const VOICE_IDS: Record<string, string> = {
-  mika: "21m00Tcm4TlvDq8ikWAM",
-  rune: "29vD33N1CtxCmqQRPOHJ",
-  sage: "EXAVITQu4vr4xnSDxMaL",
+  maya: "21m00Tcm4TlvDq8ikWAM",
+  rex: "29vD33N1CtxCmqQRPOHJ",
+  sol: "EXAVITQu4vr4xnSDxMaL",
+};
+
+const TEAMMATE_PROMPTS: Record<string, string> = {
+  maya: `You are Maya, a medical research specialist. Methodical, thorough, detail-oriented. You read prescriptions, search PubMed, and extract structured data from medical documents. You say things like "let me pull up the details on that" and "here's what the literature says." Keep responses to 2-4 sentences.`,
+  rex: `You are Rex, a drug interaction and safety specialist. Careful, authoritative, never hand-waves safety concerns. You cross-reference everything against FDA databases. You say things like "the FDA label says..." and "I need to flag this." Keep responses to 2-3 sentences.`,
+  sol: `You are Sol, a synthesis and communication specialist. Warm, clear, makes complex medical information accessible. You say things like "here's the bottom line" and "let me put this together for you." Keep responses to 3-5 sentences.`,
 };
 
 /**
  * Query Supermemory for session-scoped memories (debrief mode).
- * Pattern from orchestrator.py query_debrief_memory().
  */
 async function querySessionMemory(
   sessionId: string,
@@ -74,7 +81,7 @@ async function querySessionMemory(
 }
 
 /**
- * Stream TTS via ElevenLabs WebSocket (same as team-chat route).
+ * Stream TTS via ElevenLabs WebSocket.
  */
 async function streamTTS(
   voiceId: string,
@@ -147,58 +154,87 @@ export async function POST(request: NextRequest) {
         memoryContext = await querySessionMemory(sessionId, teammate, message);
       }
 
-      // Call Modal
-      let result = null;
-      if (MODAL_ENDPOINT) {
-        try {
-          const modalBody: Record<string, unknown> = {
-            config_id: teammate,
-            conversation_history: history,
-            current_input: message,
-            mode: "chat",
-            task: "",
-          };
+      // Build prompt
+      const basePrompt = TEAMMATE_PROMPTS[teammate] || TEAMMATE_PROMPTS.maya;
+      let systemPrompt = basePrompt;
 
-          // If we have session memory, inject it as extra context
-          if (memoryContext) {
-            modalBody.current_input =
-              `[DEBRIEF CONTEXT — Your memories from the recent session:\n${memoryContext}\n]\n\nUser question: ${message}`;
-          }
+      const formattingRules = `\n\nCRITICAL RULES:
+1. You MUST wrap your entire internal reasoning process in <think>...</think> tags FIRST.
+2. Immediately after the closing </think> tag, you MUST output a valid JSON object matching this exact schema:
+{"spoken_message": "2-3 sentences max", "confidence": 0.9, "sentiment": "analytical"}
+3. The 'spoken_message' MUST NOT contain any markdown, asterisks, or bullet points. Output raw spoken English only.`;
 
-          const res = await fetch(MODAL_ENDPOINT, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(modalBody),
-          });
-          if (res.ok) result = await res.json();
-        } catch {
-          /* fallthrough */
-        }
+      if (memoryContext) {
+        systemPrompt += `\n\nHere are your memories from the recent session:\n${memoryContext}`;
       }
+      systemPrompt += formattingRules;
 
-      if (result) {
+      // Call Anthropic API
+      try {
+        const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+        const response = await client.messages.create({
+          model: ANTHROPIC_MODEL,
+          max_tokens: 2048,
+          system: systemPrompt,
+          messages: [
+            ...history.map((h: { role: string; content: string }) => ({
+              role: h.role as "user" | "assistant",
+              content: h.content,
+            })),
+            { role: "user" as const, content: message },
+          ],
+        });
+
+        const rawText = response.content[0].type === "text" ? response.content[0].text : "";
+
+        // Parse response — extract <think> tags and JSON
+        let reasoning = "";
+        let messageText = rawText;
+
+        const thinkMatch = rawText.match(/<think>([\s\S]*?)<\/think>/);
+        if (thinkMatch) {
+          reasoning = thinkMatch[1].trim();
+          messageText = rawText.replace(thinkMatch[0], "").trim();
+        }
+
+        // Strip markdown code fences
+        const jsonMatch = messageText.match(/```json\s*([\s\S]*?)\s*```/i);
+        if (jsonMatch) {
+          messageText = jsonMatch[1].trim();
+        }
+        messageText = messageText.replace(/^`+|`+$/g, "").trim();
+
+        let spokenMessage = "";
+        let confidence = 0.5;
+        let sentiment = "neutral";
+
+        try {
+          const parsed = JSON.parse(messageText);
+          spokenMessage = (parsed.spoken_message || "").replace(/[*_#`~]/g, "");
+          confidence = parseFloat(parsed.confidence || "0.5");
+          sentiment = parsed.sentiment || "neutral";
+        } catch {
+          spokenMessage = messageText.replace(/[*_#`~]/g, "");
+        }
+
         emit({
           event: "task_result",
           teammate,
-          thinking: result.thinking,
-          confidence: result.confidence,
-          sentiment: result.sentiment,
+          thinking: reasoning,
+          confidence,
+          sentiment,
         });
 
-        const voiceText = result.voice_text || result.result || "";
-
-        // Emit full text for subtitles
-        emit({ event: "voice_text", teammate, text: voiceText });
+        emit({ event: "voice_text", teammate, text: spokenMessage });
 
         // Stream TTS audio
         const voiceId = VOICE_IDS[teammate];
         if (voiceId && !request.signal.aborted) {
-          await streamTTS(voiceId, voiceText, teammate, emit);
+          await streamTTS(voiceId, spokenMessage, teammate, emit);
         }
-
-        if (result.memory) {
-          emit({ event: "memory_node", teammate, content: result.memory });
-        }
+      } catch (err) {
+        console.error("[Hangout] LLM error:", err);
+        emit({ event: "voice_text", teammate, text: "I'm having trouble connecting right now. Try again in a moment." });
       }
 
       emit({ event: "turn_end", teammate });
