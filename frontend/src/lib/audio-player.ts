@@ -11,8 +11,10 @@ const SAMPLE_RATE = 24_000;
 
 let audioContext: AudioContext | null = null;
 let nextPlayTime = 0;
+let stopped = false;
 
 export function initAudio(): AudioContext {
+  stopped = false;
   if (!audioContext) {
     audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
   }
@@ -30,6 +32,7 @@ export function initAudio(): AudioContext {
  * ElevenLabs WebSocket returns base64-encoded PCM 16-bit signed integer audio.
  */
 export function playChunk(base64Audio: string): void {
+  if (stopped) return;
   if (!audioContext) initAudio();
   if (!audioContext) return;
 
@@ -67,6 +70,7 @@ export function playChunk(base64Audio: string): void {
  * Used when the user interrupts a conversation.
  */
 export function stopAll(): void {
+  stopped = true;
   if (audioContext) {
     audioContext.close();
     audioContext = null;

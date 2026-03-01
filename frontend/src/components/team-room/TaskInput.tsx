@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import { Send, Square, Mic, MicOff } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";
 import { useTeamChat } from "@/hooks/useSSE";
+import { initAudio } from "@/lib/audio-player";
 
 export function TaskInput() {
   const [input, setInput] = useState("");
@@ -19,6 +20,9 @@ export function TaskInput() {
   const handleSubmit = useCallback(() => {
     const text = input.trim();
     if (!text || isStreaming) return;
+
+    // Unblock AudioContext during user gesture so TTS plays without browser autoplay block
+    initAudio();
 
     setInput("");
 
