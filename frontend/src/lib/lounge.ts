@@ -14,40 +14,56 @@ export function generateLoungeConversation(data: DischargeState): LoungeMessage[
   const now = Date.now();
   const t = (offsetMins: number) => now - offsetMins * 60 * 1000;
 
-  const medList = medications.map((m) => `${m.name} ${m.dosage}`).join(" and ");
-  const r0 = restrictions[0];
-  const r1 = restrictions[1];
+  const medNames = medications.map((m) => `${m.name} ${m.dosage}`).join(", ");
+  const narcotic = medications.find((m) => m.domain_flags.includes("narcotic"));
+  const anticoag = medications.find((m) => m.domain_flags.includes("dvt_prophylaxis") || m.domain_flags.includes("anticoagulant"));
+  const ptRestriction = restrictions.find((r) => r.category === "Physical Therapy");
+  const dvtSign = warning_signs.find((w) => /dvt|clot|swelling/i.test(w.implication));
+  const peSign = warning_signs.find((w) => /pulmonary|embolism|shortness/i.test(w.implication));
 
   return [
     {
       id: "seed-0",
       agent: "Medication Agent",
-      text: `I've reviewed the discharge medications for the ${patient_profile.procedure}. The patient is on ${medList}. Key note: ${medications[0].instructions}`,
-      timestamp: t(4),
+      text: `Discharge chart loaded for ${patient_profile.procedure} (${patient_profile.discharge_date}). Patient is on ${medNames}. ` +
+        (anticoag
+          ? `${anticoag.name} ${anticoag.dosage} is prescribed for DVT prophylaxis — critical that this is taken daily without gaps.`
+          : `Pain management is the primary concern for the first 72 hours.`),
+      timestamp: t(7),
     },
     {
       id: "seed-1",
-      agent: "Recovery Agent",
-      text: `Thanks. For ${r0.category}: ${r0.rule}${r0.timeline ? ` (${r0.timeline})` : ""}. I'd suggest timing pain meds 30 minutes before any therapy sessions for better mobility.`,
-      timestamp: t(3),
+      agent: "Emergency Agent",
+      text: `Flagging ${warning_signs.length} warning signs on this chart. ` +
+        (dvtSign ? `DVT risk is elevated post-knee-surgery — symptoms to watch: ${dvtSign.symptom}. Action: ${dvtSign.action}. ` : "") +
+        (peSign ? `Also monitoring for PE: ${peSign.symptom}.` : ""),
+      timestamp: t(6),
     },
     {
       id: "seed-2",
-      agent: "Medication Agent",
-      text: `Good call. Also ${r1.category}: ${r1.rule}${r1.strict_prohibitions ? ` Strict prohibitions: ${r1.strict_prohibitions.join(", ")}.` : ""}`,
-      timestamp: t(2),
+      agent: "Recovery Agent",
+      text: ptRestriction
+        ? `PT protocol: ${ptRestriction.rule} ` +
+          `I'd recommend timing ${narcotic ? narcotic.name : "pain meds"} 30–45 minutes before each therapy session to maximize mobility and comfort during exercises.`
+        : `Recovery plan is loaded. Coordinating PT schedule with medication timing for optimal outcomes.`,
+      timestamp: t(5),
     },
     {
       id: "seed-3",
-      agent: "Emergency Agent",
-      text: `I've flagged ${warning_signs.length} warning signs to monitor: ${warning_signs.map((w) => w.symptom).join(", ")}. ${warning_signs[0].action}.`,
-      timestamp: t(1),
+      agent: "Medication Agent",
+      text: narcotic && anticoag
+        ? `One interaction to flag: ${narcotic.name} and ${anticoag.name} can both thin the blood slightly. Not contraindicated, but watch for unusual bruising. ` +
+          `Also — ${narcotic.name} strictly no alcohol and no driving. Patient must not miss ${anticoag.name} doses.`
+        : `Medication schedule is straightforward. Remind patient to take Ibuprofen with food to protect the stomach lining.`,
+      timestamp: t(3),
     },
     {
       id: "seed-4",
       agent: "Recovery Agent",
-      text: `Overall plan looks solid. Feel free to ask anything here, or visit one of our individual rooms for a private conversation.`,
-      timestamp: t(0.5),
+      text: `Full care plan is in sync. I'll monitor rep counts and ROM progress in PT Studio. ` +
+        `Each agent room is available for a private one-on-one conversation — voice or text. ` +
+        `Ask us anything, any time.`,
+      timestamp: t(1),
     },
   ];
 }

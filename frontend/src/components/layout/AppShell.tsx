@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import {
-  Activity, User, ClipboardList, Pill, HeartPulse, ShieldAlert,
+  Activity, User, ClipboardList, Pill, HeartPulse, ShieldAlert, Sun, Moon
 } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";
 import { ChannelSidebar } from "./ChannelSidebar";
@@ -40,28 +40,42 @@ function TopBar() {
   const physician = discharge?.patient_profile.attending_physician
     .split(",")[0].replace(/^Dr\.\s*/, "") ?? "—";
   const dischargeDate = discharge?.patient_profile.discharge_date ?? "—";
+  const theme = useAppStore((s) => s.theme);
+  const toggleTheme = useAppStore((s) => s.toggleTheme);
 
   return (
-    <header className="flex items-center justify-between px-5 h-[48px] bg-[#09090b] border-b border-white/[0.06] shrink-0">
+    <header className="flex items-center justify-between px-5 h-[48px] bg-[var(--color-surface)] border-b border-[var(--color-border)] shrink-0">
       <div className="flex items-center gap-2">
-        <Activity size={16} className="text-[#6366f1]" />
-        <span className="text-[13px] font-semibold text-[#fafafa] tracking-[-0.01em]">CampfireCare</span>
-        <span className="text-[#27272a] mx-1 text-xs">/</span>
-        <span className="text-[12px] text-[#52525b]">{ROOM_NAMES[activeRoom]}</span>
+        <Activity size={16} style={{ color: "var(--color-accent)" }} />
+        <span className="text-[13px] font-semibold tracking-[-0.01em]" style={{ color: "var(--color-ink)" }}>CampfireCare</span>
+        <span className="mx-1 text-xs" style={{ color: "var(--color-dim)" }}>/</span>
+        <span className="text-[12px]" style={{ color: "var(--color-muted)" }}>{ROOM_NAMES[activeRoom]}</span>
       </div>
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2">
         {discharge && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.03] border border-white/[0.06]">
-            <User size={11} className="text-[#52525b]" />
-            <span className="text-[11px] text-[#71717a]">{physician} · {dischargeDate}</span>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border" style={{ background: "var(--color-accent-soft)", borderColor: "var(--color-border)" }}>
+            <User size={11} style={{ color: "var(--color-muted)" }} />
+            <span className="text-[11px]" style={{ color: "var(--color-secondary)" }}>{physician} · {dischargeDate}</span>
           </div>
         )}
+
+        {/* Light / Dark toggle */}
+        <button
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          className="flex items-center justify-center w-7 h-7 rounded-md border transition-all duration-200 hover:scale-105"
+          style={{ background: "var(--color-faint)", borderColor: "var(--color-border)", color: "var(--color-secondary)" }}
+        >
+          {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+        </button>
+
         <button
           onClick={toggleRightPanel}
           className={`text-[11px] font-medium px-2.5 py-1 rounded-md border transition-all duration-150 ${rightPanelOpen
-              ? "bg-[#6366f1]/8 border-[#6366f1]/20 text-[#818cf8]"
-              : "bg-transparent border-white/[0.06] text-[#52525b] hover:border-white/[0.1] hover:text-[#71717a]"
+            ? "bg-[#6366f1]/8 border-[#6366f1]/20 text-[#818cf8]"
+            : "border-[var(--color-border)] hover:border-[var(--color-border-hover)]"
             }`}
+          style={{ color: rightPanelOpen ? undefined : "var(--color-muted)" }}
         >
           Activity
         </button>
@@ -238,7 +252,15 @@ export function AppShell() {
   const activeRoom = useAppStore((s) => s.activeRoom);
   const setDischarge = useAppStore((s) => s.setDischarge);
   const setLoungeMessages = useAppStore((s) => s.setLoungeMessages);
+  const theme = useAppStore((s) => s.theme);
   const isRoomView = ROOM_VIEWS.has(activeRoom);
+
+  // Apply data-theme attribute to <html> on mount and whenever it changes
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    // Smooth color-scheme transition
+    document.documentElement.style.transition = 'background-color 0.3s ease, color 0.3s ease';
+  }, [theme]);
 
   useEffect(() => {
     fetch("/api/discharge")
@@ -257,13 +279,19 @@ export function AppShell() {
   }, [setDischarge, setLoungeMessages]);
 
   return (
-    <div className="flex flex-col h-screen bg-[#09090b]">
+    <div
+      className="flex flex-col h-screen"
+      style={{ background: "var(--color-bg)", color: "var(--color-ink)", transition: "background 0.3s ease, color 0.3s ease" }}
+    >
       <TopBar />
       <div className="flex flex-1 overflow-hidden">
         <ChannelSidebar />
         <div className="flex flex-col flex-1 overflow-hidden">
           <StatusBar />
-          <main className={`flex-1 ${isRoomView ? "overflow-hidden" : "overflow-y-auto p-5"}`}>
+          <main
+            className={`flex-1 ${isRoomView ? "overflow-hidden" : "overflow-y-auto p-5"}`}
+            style={{ background: "var(--color-bg)" }}
+          >
             <MainContent />
           </main>
         </div>

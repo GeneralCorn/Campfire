@@ -52,6 +52,10 @@ interface AppState {
   // ── Sidebar pulse animations ──
   pulsedRooms: Partial<Record<RoomId, boolean>>;
   setPulse: (room: RoomId, v: boolean) => void;
+
+  // ── Theme ──
+  theme: 'dark' | 'light';
+  toggleTheme: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -102,4 +106,14 @@ export const useAppStore = create<AppState>((set) => ({
   // Sidebar pulse animations
   pulsedRooms: {},
   setPulse: (room, v) => set((s) => ({ pulsedRooms: { ...s.pulsedRooms, [room]: v } })),
+
+  // Theme (dark by default)
+  theme: 'dark' as const,
+  toggleTheme: () => set((s) => {
+    const next = s.theme === 'dark' ? 'light' : 'dark';
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', next);
+    }
+    return { theme: next };
+  }),
 }));

@@ -14,7 +14,6 @@ const CYAN = "#00FFFF";
 const GREEN = "#00FF88";
 const YELLOW = "#FFD600";
 const RED = "#FF4444";
-const MAGENTA = "#FF44FF";
 const GLOW_BLUR = 10;
 const LINE_WIDTH = 2.5;
 const DOT_RADIUS = 4;
@@ -179,15 +178,14 @@ export const EXERCISES: Record<ExerciseId, ExerciseConfig> = {
 /*  HELPERS                                                                  */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
-const POSE_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/pose";
-const POSE_JS  = `${POSE_CDN}/pose.js`;
-const CAM_JS   = "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js";
+const POSE_LOCAL = "/mediapipe/pose";
+const POSE_JS    = `${POSE_LOCAL}/pose.js`;
+const CAM_JS     = "/mediapipe/camera_utils/camera_utils.js";
 
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
     if (existing) {
-      // Script tag exists; if already loaded resolve, otherwise wait
       if (existing.dataset.loaded === "1") { resolve(); return; }
       existing.addEventListener("load", () => resolve());
       existing.addEventListener("error", () => reject(new Error(`Failed: ${src}`)));
@@ -267,6 +265,18 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
   const phaseRef = useRef<"extending" | "contracting">("extending");
   const bestRomRef = useRef(0);
 
+  // ── Refs that keep the pose onResults closure up-to-date without re-init ──
+  // Pose init runs once; these refs let it read the latest props each frame.
+  const exRef = useRef(ex);
+  const showLabelsRef = useRef(showLabels);
+  const onBreachRef = useRef(onBreach);
+  const onRepCompleteRef = useRef(onRepComplete);
+
+  useEffect(() => { exRef.current = ex; }, [ex]);
+  useEffect(() => { showLabelsRef.current = showLabels; }, [showLabels]);
+  useEffect(() => { onBreachRef.current = onBreach; }, [onBreach]);
+  useEffect(() => { onRepCompleteRef.current = onRepComplete; }, [onRepComplete]);
+
   const [angle, setAngle] = useState<number | null>(null);
   const [isBreach, setIsBreach] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -274,7 +284,7 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
   const [bestRom, setBestRom] = useState(0);
   const [sessionTime, setSessionTime] = useState(0);
 
-  // Reset state when exercise changes
+  // Reset per-exercise counters when exercise changes (no pose re-init needed)
   useEffect(() => {
     repCountRef.current = 0;
     phaseRef.current = "extending";
@@ -322,7 +332,6 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
     (ctx: CanvasRenderingContext2D, lm: any, label: MedLabel) => {
       const x = lm.x * VIDEO_W + (label.offsetX ?? 8);
       const y = lm.y * VIDEO_H + (label.offsetY ?? -8);
-      // Background pill
       ctx.font = "bold 8px Inter, sans-serif";
       const lineW = ctx.measureText(label.medical).width;
       ctx.font = "7px Inter, sans-serif";
@@ -331,11 +340,9 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
       ctx.beginPath();
       ctx.roundRect(x - 2, y - 12, w + 4, 24, 4);
       ctx.fill();
-      // Medical term
       ctx.fillStyle = CYAN;
       ctx.font = "bold 8px Inter, sans-serif";
       ctx.fillText(label.medical, x, y);
-      // Common name
       ctx.fillStyle = "#a1a1aa";
       ctx.font = "7px Inter, sans-serif";
       ctx.fillText(label.label, x, y + 10);
@@ -348,14 +355,12 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
       const cy = jointLm.y * VIDEO_H;
       const radius = 28;
 
-      // Background arc
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
       ctx.lineWidth = 4;
       ctx.stroke();
 
-      // Progress arc
       const range = config.extendedAngle - config.contractedAngle;
       const progress = Math.min(1, Math.max(0, (currentAngle - config.contractedAngle) / range));
       const startAngle = -Math.PI / 2;
@@ -371,7 +376,6 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Angle text in center
       ctx.fillStyle = color;
       ctx.font = "bold 11px monospace";
       ctx.textAlign = "center";
@@ -380,7 +384,7 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
     }, []
   );
 
-  /* ── MediaPipe init ──────────────────────────────────────────────────── */
+  /* ── MediaPipe init — runs ONCE, reads latest props via refs each frame ── */
   useEffect(() => {
     let cancelled = false;
     let cameraInstance: any = null;
@@ -388,20 +392,19 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
     async function init() {
       if (cancelled) return;
 
-      // Load scripts from CDN (these packages have no ESM exports)
-      await loadScript(POSE_JS);
-      await loadScript(CAM_JS);
+      // Load both CDN scripts in parallel
+      await Promise.all([loadScript(POSE_JS), loadScript(CAM_JS)]);
       if (cancelled) return;
 
       const PoseCtor = await waitForGlobal("Pose");
       if (cancelled) return;
 
       const pose = new PoseCtor({
-        locateFile: (file: string) => `${POSE_CDN}/${file}`,
+        locateFile: (file: string) => `${POSE_LOCAL}/${file}`,
       });
 
       pose.setOptions({
-        modelComplexity: 1,
+        modelComplexity: 0,          // lite model — significantly faster init
         smoothLandmarks: true,
         enableSegmentation: false,
         minDetectionConfidence: 0.5,
@@ -419,6 +422,8 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
         const lms = results.poseLandmarks;
         if (!lms) return;
 
+        // Read current exercise from ref — no re-init when exercise changes
+        const currentEx = exRef.current;
         const isVisible = (idx: number) => lms[idx] && (lms[idx].visibility ?? 0) > 0.4;
 
         /* ── 1. Draw full skeleton ─────────────────────────────────────── */
@@ -427,79 +432,63 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
             drawLine(ctx, lms[a], lms[b], "rgba(0, 255, 255, 0.25)");
           }
         }
-
-        // Dots for all visible landmarks
         for (let i = 0; i < 33; i++) {
-          if (isVisible(i)) {
-            drawDot(ctx, lms[i], "rgba(0, 255, 255, 0.4)", 3);
-          }
+          if (isVisible(i)) drawDot(ctx, lms[i], "rgba(0, 255, 255, 0.4)", 3);
         }
 
         /* ── 2. Highlight exercise chain ───────────────────────────────── */
-        const chain = ex.highlightChain;
+        const chain = currentEx.highlightChain;
         const chainVisible = chain.every(isVisible);
-
         if (chainVisible) {
           for (let i = 0; i < chain.length - 1; i++) {
             drawLine(ctx, lms[chain[i]], lms[chain[i + 1]], GREEN, 3.5);
           }
-          for (const idx of chain) {
-            drawDot(ctx, lms[idx], GREEN, 5);
-          }
+          for (const idx of chain) drawDot(ctx, lms[idx], GREEN, 5);
         }
 
         /* ── 3. Medical labels ─────────────────────────────────────────── */
-        if (showLabels) {
+        if (showLabelsRef.current) {
           for (const label of MEDICAL_LABELS) {
-            if (isVisible(label.idx)) {
-              drawLabel(ctx, lms[label.idx], label);
-            }
+            if (isVisible(label.idx)) drawLabel(ctx, lms[label.idx], label);
           }
         }
 
         /* ── 4. Angle calculation & rep counting ───────────────────────── */
-        const [aIdx, bIdx, cIdx] = ex.landmarks;
+        const [aIdx, bIdx, cIdx] = currentEx.landmarks;
         if (isVisible(aIdx) && isVisible(bIdx) && isVisible(cIdx)) {
           const currentAngle = calcAngle(lms[aIdx], lms[bIdx], lms[cIdx]);
           setAngle(currentAngle);
 
-          // ROM gauge at the joint
-          drawRomGauge(ctx, lms[bIdx], currentAngle, ex);
+          drawRomGauge(ctx, lms[bIdx], currentAngle, currentEx);
 
-          // Track best ROM
-          const rom = Math.abs(currentAngle - ex.contractedAngle);
+          const rom = Math.abs(currentAngle - currentEx.contractedAngle);
           if (rom > bestRomRef.current) {
             bestRomRef.current = rom;
             setBestRom(rom);
           }
 
-          // Rep counting: detect contraction then extension
-          const threshold = (ex.contractedAngle + ex.extendedAngle) / 2;
+          const threshold = (currentEx.contractedAngle + currentEx.extendedAngle) / 2;
           if (phaseRef.current === "extending" && currentAngle < threshold) {
             phaseRef.current = "contracting";
           } else if (phaseRef.current === "contracting" && currentAngle > threshold) {
             phaseRef.current = "extending";
             repCountRef.current += 1;
             setReps(repCountRef.current);
-            onRepComplete?.(repCountRef.current);
+            onRepCompleteRef.current?.(repCountRef.current);
           }
 
-          // Breach detection
-          if (currentAngle < ex.breachBelow) {
+          if (currentAngle < currentEx.breachBelow) {
             setIsBreach(true);
-            // Redraw chain in red
             if (chainVisible) {
               for (let i = 0; i < chain.length - 1; i++) {
                 drawLine(ctx, lms[chain[i]], lms[chain[i + 1]], RED, 3.5);
               }
-              for (const idx of chain) {
-                drawDot(ctx, lms[idx], RED, 6);
-              }
+              for (const idx of chain) drawDot(ctx, lms[idx], RED, 6);
             }
             const now = Date.now();
-            if (onBreach && now - lastBreachRef.current >= BREACH_COOLDOWN_MS) {
+            if (onBreachRef.current && now - lastBreachRef.current >= BREACH_COOLDOWN_MS) {
               lastBreachRef.current = now;
-              onBreach(currentAngle);
+              onBreachRef.current(currentAngle);
             }
           } else {
             setIsBreach(false);
@@ -517,9 +506,7 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
         else video.onloadeddata = () => r();
       });
       if (cancelled) return;
-      setIsLoading(false);
 
-      // Camera constructor from CDN
       const CamCtor = await waitForGlobal("Camera");
       if (cancelled) return;
 
@@ -528,11 +515,15 @@ const LivePTCamera: React.FC<LivePTCameraProps> = ({
         width: VIDEO_W, height: VIDEO_H,
       });
       cameraInstance.start();
+
+      // Mark ready only after camera is running, not just when video is ready
+      setIsLoading(false);
     }
 
     init();
     return () => { cancelled = true; cameraInstance?.stop(); };
-  }, [exercise, showLabels, onBreach, onRepComplete, drawLine, drawDot, drawLabel, drawRomGauge, ex]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — pose initializes once; props flow through refs
 
   /* ═══════════════════════════════════════════════════════════════════════ */
   /*  RENDER                                                                */

@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "copy:mediapipe": "node -e \"const {cpSync}=require('fs');cpSync('node_modules/@mediapipe/pose','public/mediapipe/pose',{recursive:true});cpSync('node_modules/@mediapipe/camera_utils','public/mediapipe/camera_utils',{recursive:true});\"",
+    "postinstall": "npm run copy:mediapipe"
   },
   "dependencies": {
     "@elevenlabs/react": "^0.14.1",

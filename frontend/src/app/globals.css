@@ -1,26 +1,41 @@
 @import "tailwindcss";
 
 @theme inline {
-  /* ── Harvey-style palette ── */
-  --color-bg: #09090b;
-  --color-surface: #111113;
-  --color-surface-2: #161618;
-  --color-border: rgba(255, 255, 255, 0.06);
-  --color-border-hover: rgba(255, 255, 255, 0.1);
+  /* ── Medical Industry palette — Harvey AI minimal + clinical authority ── */
 
-  --color-accent: #6366f1;
-  --color-accent-soft: rgba(99, 102, 241, 0.08);
-  --color-accent-hover: #818cf8;
+  /* Backgrounds: cool navy-slate (Epic, Mayo Clinic, NHS digital feel)       */
+  --color-bg: #060b14;
+  --color-surface: #0b1220;
+  --color-surface-2: #0f1929;
+  --color-border: rgba(148, 163, 184, 0.08);
+  --color-border-hover: rgba(148, 163, 184, 0.15);
 
-  --color-success: #22c55e;
-  --color-warning: #eab308;
-  --color-danger: #ef4444;
+  /* Medical teal — canonical health-system accent (pharmacy, EHR standard)  */
+  --color-accent: #0891b2;
+  --color-accent-soft: rgba(8, 145, 178, 0.09);
+  --color-accent-hover: #22d3ee;
 
-  --color-ink: #fafafa;
-  --color-secondary: #a1a1aa;
-  --color-muted: #71717a;
-  --color-dim: #3f3f46;
-  --color-faint: #27272a;
+  /* Clinical signal palette                                                  */
+  --color-success: #16a34a;
+  /* forest green — stable vitals                */
+  --color-warning: #d97706;
+  /* amber — caution / monitoring                */
+  --color-danger: #b45309;
+  /* deep amber — alert without panic            */
+  --color-critical: #dc2626;
+  /* red — genuine medical emergency             */
+
+  /* Text hierarchy — crisp on dark navy, WCAG AA+ contrast                  */
+  --color-ink: #f8fafc;
+  /* slate-50 — clean clinical white             */
+  --color-secondary: #94a3b8;
+  /* slate-400                                   */
+  --color-muted: #64748b;
+  /* slate-500                                   */
+  --color-dim: #334155;
+  /* slate-700                                   */
+  --color-faint: #0f172a;
+  /* slate-900 — subtle fills                    */
 
   /* ── Typography ── */
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -40,8 +55,110 @@ body {
   background: var(--color-bg);
   color: var(--color-ink);
   overflow: hidden;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
+  font-feature-settings: 'liga' 1, 'kern' 1;
+  font-size: 14px;
+  line-height: 1.6;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/*  LIGHT THEME OVERRIDES                                                    */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-theme="light"] {
+  /* Clinical white backgrounds                                                */
+  --color-bg: #f0f4f8;
+  --color-surface: #ffffff;
+  --color-surface-2: #f8fafc;
+  --color-border: rgba(15, 23, 42, 0.09);
+  --color-border-hover: rgba(15, 23, 42, 0.16);
+
+  /* Medical teal accent — same across both themes                             */
+  --color-accent: #0891b2;
+  --color-accent-soft: rgba(8, 145, 178, 0.1);
+  --color-accent-hover: #0e7490;
+
+  /* Clinical signals                                                          */
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #b45309;
+  --color-critical: #dc2626;
+
+  /* Text — deep navy on white                                                 */
+  --color-ink: #0f172a;
+  --color-secondary: #475569;
+  --color-muted: #64748b;
+  --color-dim: #94a3b8;
+  --color-faint: #e2e8f0;
+
+  /* ── Override hardcoded dark backgrounds on layout containers ── */
+  background-color: #f0f4f8;
+  color: #0f172a;
+}
+
+/* Force all children of the light-themed root to inherit light colors.
+   Target key backgrounds used across the hardcoded components. */
+:root[data-theme="light"] body,
+:root[data-theme="light"] main,
+:root[data-theme="light"] aside {
+  background-color: #f0f4f8 !important;
+}
+
+/* Sidebar, header, top bar */
+:root[data-theme="light"] header,
+:root[data-theme="light"] nav {
+  background-color: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.09) !important;
+}
+
+/* Chat containers & room panels */
+:root[data-theme="light"] [class*="bg-[#09090b]"],
+:root[data-theme="light"] [class*="bg-[#0b1220]"],
+:root[data-theme="light"] [class*="bg-[#07080a]"],
+:root[data-theme="light"] [class*="bg-[#060b14]"] {
+  background-color: #f0f4f8 !important;
+}
+
+/* Surface panels — sidebar, panels, cards */
+:root[data-theme="light"] [class*="bg-[#111113]"],
+:root[data-theme="light"] [class*="bg-[#0e0f12]"],
+:root[data-theme="light"] [class*="bg-[#0b1220]"],
+:root[data-theme="light"] [class*="bg-[#161820]"],
+:root[data-theme="light"] [class*="bg-[#0f1929]"] {
+  background-color: #ffffff !important;
+}
+
+/* Text */
+:root[data-theme="light"] [class*="text-[#fafafa]"],
+:root[data-theme="light"] [class*="text-[#f0f9ff]"],
+:root[data-theme="light"] [class*="text-[#f8fafc]"],
+:root[data-theme="light"] [class*="text-[#e4e4e7]"],
+:root[data-theme="light"] [class*="text-[#e2e8f0]"] {
+  color: #0f172a !important;
+}
+
+:root[data-theme="light"] [class*="text-[#a1a1aa]"],
+:root[data-theme="light"] [class*="text-[#94a3b8]"],
+:root[data-theme="light"] [class*="text-[#71717a]"] {
+  color: #475569 !important;
+}
+
+:root[data-theme="light"] [class*="text-[#52525b]"],
+:root[data-theme="light"] [class*="text-[#64748b]"],
+:root[data-theme="light"] [class*="text-[#475569]"] {
+  color: #64748b !important;
+}
+
+:root[data-theme="light"] [class*="text-[#3f3f46]"],
+:root[data-theme="light"] [class*="text-[#334155]"] {
+  color: #94a3b8 !important;
+}
+
+/* Borders */
+:root[data-theme="light"] [class*="border-white/"] {
+  border-color: rgba(15, 23, 42, 0.09) !important;
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  ORB VISUALIZER                                                           */
@@ -309,6 +426,7 @@ body {
     transform: translateY(20px) scale(0.96);
     filter: blur(3px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -321,6 +439,7 @@ body {
     opacity: 0;
     transform: translateX(-10px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -331,24 +450,31 @@ body {
   0% {
     background-position: -200% 0;
   }
+
   100% {
     background-position: 200% 0;
   }
 }
 
 @keyframes tool-call-pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 0.8;
   }
+
   50% {
     opacity: 1;
   }
 }
 
 @keyframes status-pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.35;
   }
