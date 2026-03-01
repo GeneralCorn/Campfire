@@ -9,86 +9,80 @@ import { ChannelSidebar } from "./ChannelSidebar";
 import { RightPanel } from "./RightPanel";
 import { CareTeamLounge } from "@/components/rooms/CareTeamLounge";
 import { AgentRoom } from "@/components/rooms/AgentRoom";
+import { PTRoom } from "@/components/rooms/PTRoom";
 import { generateLoungeConversation } from "@/lib/lounge";
 import type { DischargeState, RoomId } from "@/types";
 
-// ── Room name map (breadcrumb) ────────────────────────────────────────────────
+/* ── Room names ────────────────────────────────────────────────────────── */
 
 const ROOM_NAMES: Record<RoomId, string> = {
-  "lounge":         "Care Team Lounge",
-  "medication-room":"Medication Room",
-  "recovery-room":  "Recovery Room",
+  "lounge": "Care Team Lounge",
+  "medication-room": "Medication Room",
+  "recovery-room": "Recovery Room",
   "emergency-room": "Emergency Room",
-  "overview":       "Overview",
-  "medications":    "Medications",
-  "restrictions":   "Restrictions",
-  "warning-signs":  "Warning Signs",
+  "pt-studio": "PT Studio",
+  "overview": "Overview",
+  "medications": "Medications",
+  "restrictions": "Restrictions",
+  "warning-signs": "Warning Signs",
 };
 
-const ROOM_VIEWS = new Set<RoomId>(["lounge", "medication-room", "recovery-room", "emergency-room"]);
+const ROOM_VIEWS = new Set<RoomId>(["lounge", "medication-room", "recovery-room", "emergency-room", "pt-studio"]);
 
-// ── Top Bar ───────────────────────────────────────────────────────────────────
+/* ── TopBar ────────────────────────────────────────────────────────────── */
 
 function TopBar() {
-  const discharge        = useAppStore((s) => s.discharge);
-  const rightPanelOpen   = useAppStore((s) => s.rightPanelOpen);
+  const discharge = useAppStore((s) => s.discharge);
+  const rightPanelOpen = useAppStore((s) => s.rightPanelOpen);
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel);
-  const activeRoom       = useAppStore((s) => s.activeRoom);
+  const activeRoom = useAppStore((s) => s.activeRoom);
 
   const physician = discharge?.patient_profile.attending_physician
-    .split(",")[0]
-    .replace(/^Dr\.\s*/, "") ?? "—";
+    .split(",")[0].replace(/^Dr\.\s*/, "") ?? "—";
   const dischargeDate = discharge?.patient_profile.discharge_date ?? "—";
 
   return (
-    <header className="flex items-center justify-between px-6 h-14 bg-white border-b border-[#E2E8F0] shrink-0">
+    <header className="flex items-center justify-between px-5 h-[48px] bg-[#09090b] border-b border-white/[0.06] shrink-0">
       <div className="flex items-center gap-2">
-        <Activity size={20} className="text-[#0891B2]" />
-        <span className="text-lg font-semibold text-[#1E293B]">CareLounge</span>
-        <span className="text-[#CBD5E1] mx-1">/</span>
-        <span className="text-sm text-[#64748B]">{ROOM_NAMES[activeRoom]}</span>
+        <Activity size={16} className="text-[#6366f1]" />
+        <span className="text-[13px] font-semibold text-[#fafafa] tracking-[-0.01em]">CampfireCare</span>
+        <span className="text-[#27272a] mx-1 text-xs">/</span>
+        <span className="text-[12px] text-[#52525b]">{ROOM_NAMES[activeRoom]}</span>
       </div>
-
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         {discharge && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#F0FDFA] border border-[#0891B2]">
-            <User size={13} className="text-[#0E7490]" />
-            <span className="text-sm text-[#0E7490] font-medium">
-              {physician} · Discharged {dischargeDate}
-            </span>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.03] border border-white/[0.06]">
+            <User size={11} className="text-[#52525b]" />
+            <span className="text-[11px] text-[#71717a]">{physician} · {dischargeDate}</span>
           </div>
         )}
         <button
           onClick={toggleRightPanel}
-          className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-all duration-200 ${
-            rightPanelOpen
-              ? "bg-[#F0FDFA] border-[#0891B2] text-[#0891B2]"
-              : "bg-white border-[#E2E8F0] text-[#64748B] hover:border-[#0891B2] hover:text-[#0891B2]"
-          }`}
+          className={`text-[11px] font-medium px-2.5 py-1 rounded-md border transition-all duration-150 ${rightPanelOpen
+              ? "bg-[#6366f1]/8 border-[#6366f1]/20 text-[#818cf8]"
+              : "bg-transparent border-white/[0.06] text-[#52525b] hover:border-white/[0.1] hover:text-[#71717a]"
+            }`}
         >
-          Care Team
+          Activity
         </button>
       </div>
     </header>
   );
 }
 
-// ── Care Team Banner (room views only) ────────────────────────────────────────
+/* ── Status bar ────────────────────────────────────────────────────────── */
 
-function CareBanner() {
+function StatusBar() {
   const activeRoom = useAppStore((s) => s.activeRoom);
   if (!ROOM_VIEWS.has(activeRoom)) return null;
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-[#F0FDFA] border-b border-[#E2E8F0] shrink-0">
-      <span className="text-sm font-medium text-[#0E7490]">
-        Your Care Team is Online
-      </span>
-      <div className="flex items-center gap-4">
-        {["Medication Agent", "Recovery Agent", "Emergency Agent"].map((a) => (
+    <div className="flex items-center justify-between px-4 py-1.5 bg-white/[0.02] border-b border-white/[0.04] shrink-0">
+      <div className="flex items-center gap-3">
+        {["Medication", "Recovery", "Emergency"].map((a) => (
           <div key={a} className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
-            <span className="text-xs text-[#64748B]">{a}</span>
+            <span className="w-[5px] h-[5px] rounded-full bg-[#22c55e] shrink-0" />
+            <span className="text-[10px] text-[#52525b]">{a}</span>
           </div>
         ))}
       </div>
@@ -96,13 +90,13 @@ function CareBanner() {
   );
 }
 
-// ── Care Plan panels ──────────────────────────────────────────────────────────
+/* ── Care Plan panels ──────────────────────────────────────────────────── */
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between items-baseline gap-4 py-2 border-b border-[#E2E8F0] last:border-0">
-      <span className="text-sm font-medium text-[#64748B] shrink-0">{label}</span>
-      <span className="text-sm text-[#1E293B] text-right">{value}</span>
+    <div className="flex justify-between items-baseline gap-4 py-2.5 border-b border-white/[0.04] last:border-0">
+      <span className="text-[12px] text-[#52525b] shrink-0">{label}</span>
+      <span className="text-[12px] text-[#a1a1aa] text-right">{value}</span>
     </div>
   );
 }
@@ -110,41 +104,34 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function OverviewPanel({ d }: { d: DischargeState }) {
   const p = d.patient_profile;
   return (
-    <div className="bg-white rounded-lg border border-[#E2E8F0] p-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <ClipboardList size={20} className="text-[#0891B2]" />
-        <h2 className="text-xl font-semibold text-[#1E293B]">Overview</h2>
+    <div className="rounded-lg border border-white/[0.06] bg-[#111113] p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <ClipboardList size={16} className="text-[#6366f1]" />
+        <h2 className="text-[15px] font-semibold text-[#fafafa]">Overview</h2>
       </div>
-      <div className="space-y-3">
-        <InfoRow label="Procedure"  value={p.procedure} />
-        <InfoRow label="Discharged" value={p.discharge_date} />
-        <InfoRow label="Physician"  value={p.attending_physician} />
-      </div>
+      <InfoRow label="Procedure" value={p.procedure} />
+      <InfoRow label="Discharged" value={p.discharge_date} />
+      <InfoRow label="Physician" value={p.attending_physician} />
     </div>
   );
 }
 
 function MedicationsPanel({ d }: { d: DischargeState }) {
   return (
-    <div className="bg-white rounded-lg border border-[#E2E8F0] p-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <Pill size={20} className="text-[#0891B2]" />
-        <h2 className="text-xl font-semibold text-[#1E293B]">Medications</h2>
+    <div className="rounded-lg border border-white/[0.06] bg-[#111113] p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <Pill size={16} className="text-[#6366f1]" />
+        <h2 className="text-[15px] font-semibold text-[#fafafa]">Medications</h2>
       </div>
       <div className="space-y-3">
         {d.medications.map((m) => (
-          <div
-            key={m.name}
-            className="relative rounded-lg border border-[#E2E8F0] p-4 pl-5"
-            style={{ borderLeft: "3px solid #0891B2" }}
-          >
-            <Pill size={14} className="absolute top-4 right-4 text-[#0891B2]" />
-            <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-base font-medium text-[#1E293B]">{m.name}</span>
-              <span className="text-sm text-[#64748B]">{m.dosage}</span>
+          <div key={m.name} className="rounded-md border border-white/[0.06] p-3.5 border-l-2 border-l-[#6366f1]/40">
+            <div className="flex items-baseline gap-2 mb-0.5">
+              <span className="text-[13px] font-medium text-[#fafafa]">{m.name}</span>
+              <span className="text-[11px] text-[#52525b]">{m.dosage}</span>
             </div>
-            <p className="text-sm text-[#64748B] mb-1">{m.frequency}</p>
-            <p className="text-sm text-[#1E293B]">{m.instructions}</p>
+            <p className="text-[11px] text-[#52525b] mb-0.5">{m.frequency}</p>
+            <p className="text-[11px] text-[#71717a]">{m.instructions}</p>
           </div>
         ))}
       </div>
@@ -154,38 +141,28 @@ function MedicationsPanel({ d }: { d: DischargeState }) {
 
 function RestrictionsPanel({ d }: { d: DischargeState }) {
   return (
-    <div className="bg-white rounded-lg border border-[#E2E8F0] p-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <HeartPulse size={20} className="text-[#059669]" />
-        <h2 className="text-xl font-semibold text-[#1E293B]">Restrictions</h2>
+    <div className="rounded-lg border border-white/[0.06] bg-[#111113] p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <HeartPulse size={16} className="text-[#22c55e]" />
+        <h2 className="text-[15px] font-semibold text-[#fafafa]">Restrictions</h2>
       </div>
       <div className="space-y-3">
         {d.restrictions.map((r) => (
-          <div
-            key={r.category}
-            className="rounded-lg border border-[#E2E8F0] p-4 pl-5"
-            style={{ borderLeft: "3px solid #059669" }}
-          >
+          <div key={r.category} className="rounded-md border border-white/[0.06] p-3.5 border-l-2 border-l-[#22c55e]/40">
             <div className="flex flex-wrap items-center gap-2 mb-1">
-              <HeartPulse size={14} className="text-[#059669]" />
-              <span className="text-base font-medium text-[#1E293B]">{r.category}</span>
+              <span className="text-[13px] font-medium text-[#fafafa]">{r.category}</span>
               {r.timeline && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-[#F0FDFA] text-[#059669] border border-[#059669]/30 font-medium">
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[#22c55e]/8 text-[#22c55e] font-medium">
                   {r.timeline}
                 </span>
               )}
-              {r.sandbox_trigger && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-[#F0FDFA] text-[#0891B2] border border-[#0891B2]/30 font-medium">
-                  {r.sandbox_trigger}
-                </span>
-              )}
             </div>
-            <p className="text-sm text-[#1E293B] mb-2">{r.rule}</p>
+            <p className="text-[11px] text-[#71717a] mb-1.5">{r.rule}</p>
             {r.strict_prohibitions && (
-              <ul className="space-y-1">
+              <ul className="space-y-0.5">
                 {r.strict_prohibitions.map((p) => (
-                  <li key={p} className="text-sm text-[#DC2626] flex items-center gap-1.5">
-                    <span className="text-xs">✕</span> {p}
+                  <li key={p} className="text-[11px] text-[#ef4444]/80 flex items-center gap-1.5">
+                    <span className="text-[8px]">✕</span> {p}
                   </li>
                 ))}
               </ul>
@@ -199,30 +176,20 @@ function RestrictionsPanel({ d }: { d: DischargeState }) {
 
 function WarningsPanel({ d }: { d: DischargeState }) {
   const isCritical = (action: string) => /emergency room|immediately/i.test(action);
-
   return (
-    <div className="bg-white rounded-lg border border-[#E2E8F0] p-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <ShieldAlert size={20} className="text-[#D97706]" />
-        <h2 className="text-xl font-semibold text-[#1E293B]">Warning Signs</h2>
+    <div className="rounded-lg border border-white/[0.06] bg-[#111113] p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <ShieldAlert size={16} className="text-[#eab308]" />
+        <h2 className="text-[15px] font-semibold text-[#fafafa]">Warning Signs</h2>
       </div>
       <div className="space-y-3">
         {d.warning_signs.map((w) => {
           const critical = isCritical(w.action);
           return (
-            <div
-              key={w.symptom}
-              className="rounded-lg border border-[#E2E8F0] p-4 pl-5"
-              style={{ borderLeft: `3px solid ${critical ? "#DC2626" : "#D97706"}` }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <ShieldAlert size={14} className={critical ? "text-[#DC2626]" : "text-[#D97706]"} />
-                <span className="text-base font-medium text-[#1E293B]">{w.symptom}</span>
-              </div>
-              <p className="text-sm text-[#64748B] mb-1">{w.implication}</p>
-              <p className="text-sm font-medium" style={{ color: critical ? "#DC2626" : "#D97706" }}>
-                → {w.action}
-              </p>
+            <div key={w.symptom} className={`rounded-md border border-white/[0.06] p-3.5 border-l-2 ${critical ? "border-l-[#ef4444]/50" : "border-l-[#eab308]/40"}`}>
+              <span className="text-[13px] font-medium text-[#fafafa]">{w.symptom}</span>
+              <p className="text-[11px] text-[#52525b] mt-0.5">{w.implication}</p>
+              <p className={`text-[11px] font-medium mt-1 ${critical ? "text-[#ef4444]/80" : "text-[#eab308]/80"}`}>→ {w.action}</p>
             </div>
           );
         })}
@@ -231,44 +198,46 @@ function WarningsPanel({ d }: { d: DischargeState }) {
   );
 }
 
-// ── Main content router ───────────────────────────────────────────────────────
+/* ── Loading ───────────────────────────────────────────────────────────── */
 
 function LoadingSpinner() {
   return (
     <div className="flex h-full items-center justify-center">
       <div className="text-center">
-        <div className="w-8 h-8 border-2 border-[#0891B2] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-        <p className="text-sm text-[#64748B]">Loading your care plan…</p>
+        <div className="w-6 h-6 border-[1.5px] border-[#6366f1]/30 border-t-[#6366f1] rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-[11px] text-[#52525b]">Loading…</p>
       </div>
     </div>
   );
 }
 
+/* ── Router ────────────────────────────────────────────────────────────── */
+
 function MainContent() {
   const activeRoom = useAppStore((s) => s.activeRoom);
-  const discharge  = useAppStore((s) => s.discharge);
+  const discharge = useAppStore((s) => s.discharge);
 
   switch (activeRoom) {
-    case "lounge":          return <CareTeamLounge />;
+    case "lounge": return <CareTeamLounge />;
     case "medication-room": return <AgentRoom key="medication-room" roomId="medication-room" />;
-    case "recovery-room":   return <AgentRoom key="recovery-room"   roomId="recovery-room" />;
-    case "emergency-room":  return <AgentRoom key="emergency-room"  roomId="emergency-room" />;
-    case "overview":        return discharge ? <OverviewPanel d={discharge} />     : <LoadingSpinner />;
-    case "medications":     return discharge ? <MedicationsPanel d={discharge} />  : <LoadingSpinner />;
-    case "restrictions":    return discharge ? <RestrictionsPanel d={discharge} /> : <LoadingSpinner />;
-    case "warning-signs":   return discharge ? <WarningsPanel d={discharge} />     : <LoadingSpinner />;
-    default:                return <CareTeamLounge />;
+    case "recovery-room": return <AgentRoom key="recovery-room" roomId="recovery-room" />;
+    case "emergency-room": return <AgentRoom key="emergency-room" roomId="emergency-room" />;
+    case "pt-studio": return <PTRoom />;
+    case "overview": return discharge ? <OverviewPanel d={discharge} /> : <LoadingSpinner />;
+    case "medications": return discharge ? <MedicationsPanel d={discharge} /> : <LoadingSpinner />;
+    case "restrictions": return discharge ? <RestrictionsPanel d={discharge} /> : <LoadingSpinner />;
+    case "warning-signs": return discharge ? <WarningsPanel d={discharge} /> : <LoadingSpinner />;
+    default: return <CareTeamLounge />;
   }
 }
 
-// ── AppShell ──────────────────────────────────────────────────────────────────
+/* ── AppShell ──────────────────────────────────────────────────────────── */
 
 export function AppShell() {
-  const rightPanelOpen   = useAppStore((s) => s.rightPanelOpen);
-  const activeRoom       = useAppStore((s) => s.activeRoom);
-  const setDischarge     = useAppStore((s) => s.setDischarge);
+  const rightPanelOpen = useAppStore((s) => s.rightPanelOpen);
+  const activeRoom = useAppStore((s) => s.activeRoom);
+  const setDischarge = useAppStore((s) => s.setDischarge);
   const setLoungeMessages = useAppStore((s) => s.setLoungeMessages);
-
   const isRoomView = ROOM_VIEWS.has(activeRoom);
 
   useEffect(() => {
@@ -288,13 +257,13 @@ export function AppShell() {
   }, [setDischarge, setLoungeMessages]);
 
   return (
-    <div className="flex flex-col h-screen bg-[#F0F4F8]">
+    <div className="flex flex-col h-screen bg-[#09090b]">
       <TopBar />
       <div className="flex flex-1 overflow-hidden">
         <ChannelSidebar />
         <div className="flex flex-col flex-1 overflow-hidden">
-          <CareBanner />
-          <main className={`flex-1 ${isRoomView ? "overflow-hidden" : "overflow-y-auto p-6"}`}>
+          <StatusBar />
+          <main className={`flex-1 ${isRoomView ? "overflow-hidden" : "overflow-y-auto p-5"}`}>
             <MainContent />
           </main>
         </div>

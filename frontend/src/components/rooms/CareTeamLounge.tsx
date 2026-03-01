@@ -1,297 +1,178 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Send, Volume2, VolumeX, Pill, HeartPulse, ShieldAlert, User, Mic } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, Users } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";
-import { apiFetch } from "@/lib/api";
-import { formatTimestamp } from "@/lib/lounge";
-import { useMicrophone } from "@/hooks/useMicrophone";
-import type { AgentName, LoungeMessage, ActivityRoute, RoomId } from "@/types";
 
-// ── Agent display config ──────────────────────────────────────────────────────
+/* ── Agent defs ────────────────────────────────────────────────────────── */
 
-const AGENT_CONFIG: Record<AgentName, { Icon: React.ElementType; color: string }> = {
-  "Medication Agent": { Icon: Pill, color: "#0891B2" },
-  "Recovery Agent": { Icon: HeartPulse, color: "#059669" },
-  "Emergency Agent": { Icon: ShieldAlert, color: "#DC2626" },
-};
+const AGENTS = [
+  { id: "medication", label: "Medication", initial: "M" },
+  { id: "recovery", label: "Recovery", initial: "R" },
+  { id: "emergency", label: "Emergency", initial: "E" },
+] as const;
 
-const ROUTE_TO_AGENT: Record<string, AgentName> = {
-  medications: "Medication Agent",
-  recovery: "Recovery Agent",
-  emergency: "Emergency Agent",
-  confer: "Medication Agent",
-  blocked: "Medication Agent",
-};
-
-const BACKEND_URL = "http://localhost:8000";
-
-// ── Message row (Slack-style) ─────────────────────────────────────────────────
-
-function MessageRow({ msg }: { msg: LoungeMessage }) {
-  if (msg.agent === "user") {
-    return (
-      <div className="flex items-start gap-3 px-4 py-3 hover:bg-[#F8FAFC]">
-        <div className="w-9 h-9 rounded-full bg-[#64748B] flex items-center justify-center shrink-0">
-          <User size={16} className="text-white" />
-        </div>
-        <div>
-          <div className="flex items-baseline gap-2 mb-0.5">
-            <span className="text-sm font-semibold text-[#64748B]">You</span>
-            <span className="text-xs text-[#94A3B8]">{formatTimestamp(msg.timestamp)}</span>
-          </div>
-          <p className="text-sm text-[#1E293B] leading-relaxed">{msg.text}</p>
-        </div>
-      </div>
-    );
-  }
-
-  const cfg = AGENT_CONFIG[msg.agent as AgentName];
-  if (!cfg) return null;
-  const { Icon, color } = cfg;
-
-  return (
-    <div className="flex items-start gap-3 px-4 py-3 hover:bg-[#F8FAFC]">
-      <div
-        className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-        style={{ backgroundColor: color }}
-      >
-        <Icon size={16} className="text-white" />
-      </div>
-      <div>
-        <div className="flex items-baseline gap-2 mb-0.5">
-          <span className="text-sm font-semibold" style={{ color }}>
-            {msg.agent}
-          </span>
-          <span className="text-xs text-[#94A3B8]">{formatTimestamp(msg.timestamp)}</span>
-        </div>
-        <p className="text-sm text-[#1E293B] leading-relaxed">{msg.text}</p>
-      </div>
-    </div>
-  );
+interface DiscussionEntry {
+  agentId: string;
+  label: string;
+  text: string;
 }
 
-// ── CareTeamLounge ────────────────────────────────────────────────────────────
+/* ── Component ─────────────────────────────────────────────────────────── */
 
 export function CareTeamLounge() {
-  const loungeMessages = useAppStore((s) => s.loungeMessages);
-  const addLoungeMessage = useAppStore((s) => s.addLoungeMessage);
-  const isStreaming = useAppStore((s) => s.isStreaming);
-  const setIsStreaming = useAppStore((s) => s.setIsStreaming);
-  const addActivity = useAppStore((s) => s.addActivity);
-  const setPulse = useAppStore((s) => s.setPulse);
-  const [input, setInput] = useState("");
-  const [muted, setMuted] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const discharge = useAppStore((s) => s.discharge);
+  const [topic, setTopic] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
+  const [activeAgent, setActiveAgent] = useState<string | null>(null);
+  const [discussion, setDiscussion] = useState<DiscussionEntry[]>([]);
+  const feedRef = useRef<HTMLDivElement>(null);
 
-  const { isRecording, startRecording, stopRecording } = useMicrophone();
+  const scroll = useCallback(() =>
+    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: "smooth" }), []);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [loungeMessages, isStreaming]);
+  useEffect(() => { scroll(); }, [discussion, scroll]);
 
-  async function submitQuery(query: string) {
-    if (!query || isStreaming) return;
+  async function handleStart() {
+    const t = topic.trim();
+    if (!t || isRunning) return;
+    setIsRunning(true);
+    setDiscussion([]);
 
-    setInput("");
-    addLoungeMessage({ id: crypto.randomUUID(), agent: "user", text: query, timestamp: Date.now() });
-    setIsStreaming(true);
-
-    try {
-      const data = await apiFetch<{
-        audio_text: string;
-        audio_base64: string | null;
-        route: string;
-        off_topic: boolean;
-        ui_trigger: string;
-      }>("/api/orchestrate", {
-        method: "POST",
-        body: JSON.stringify({ query }),
-      });
-
-      const agentName = ROUTE_TO_AGENT[data.route] ?? "Medication Agent";
-      const turnId = crypto.randomUUID();
-
-      addLoungeMessage({ id: turnId, agent: agentName, text: data.audio_text, timestamp: Date.now() });
-      addActivity({
-        id: turnId,
-        timestamp: Date.now(),
-        route: data.route as ActivityRoute,
-        audio_text: data.audio_text,
-        off_topic: data.off_topic,
-      });
-
-      // Play TTS audio if available and not muted
-      if (data.audio_base64 && !muted) {
-        try {
-          const audioBytes = Uint8Array.from(atob(data.audio_base64), (c) => c.charCodeAt(0));
-          const blob = new Blob([audioBytes], { type: "audio/mpeg" });
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          audio.onended = () => URL.revokeObjectURL(url);
-          audio.play();
-        } catch (err) {
-          console.error("[TTS] Audio playback failed:", err);
-        }
-      }
-
-      // Pulse the relevant sidebar room
-      const TRIGGER_PULSE: Record<string, RoomId[]> = {
-        highlight_medications: ["medication-room"],
-        highlight_restrictions: ["recovery-room"],
-        highlight_warnings: ["emergency-room"],
-        highlight_both: ["medication-room", "recovery-room"],
-      };
-      for (const roomId of TRIGGER_PULSE[data.ui_trigger] ?? []) {
-        setPulse(roomId, true);
-        setTimeout(() => setPulse(roomId, false), 3200);
-      }
-    } catch {
-      addLoungeMessage({
-        id: crypto.randomUUID(),
-        agent: "Medication Agent",
-        text: "Sorry, I couldn't reach the care team right now. Please try again.",
-        timestamp: Date.now(),
-      });
-    } finally {
-      setIsStreaming(false);
-    }
-  }
-
-  function submit() {
-    submitQuery(input.trim());
-  }
-
-  async function toggleMic() {
-    if (isRecording) {
-      // Stop recording → transcribe → submit
-      const blob = await stopRecording();
-      setIsTranscribing(true);
-
+    for (const agent of AGENTS) {
+      setActiveAgent(agent.id);
       try {
-        const formData = new FormData();
-        formData.append("file", blob, "recording.webm");
-
-        const res = await fetch(`${BACKEND_URL}/api/transcribe`, {
+        const res = await fetch("/api/orchestrate", {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_message: `As the ${agent.label} agent, share your perspective on: ${t}`,
+            history: [],
+            discharge_context: discharge,
+            active_agent: agent.id,
+          }),
         });
         const data = await res.json();
-
-        if (data.status === "success" && data.text) {
-          submitQuery(data.text);
-        }
-      } catch (err) {
-        console.error("[Mic] Transcription failed:", err);
-      } finally {
-        setIsTranscribing(false);
+        setDiscussion((prev) => [...prev, {
+          agentId: agent.id,
+          label: agent.label,
+          text: data.response || "No response.",
+        }]);
+      } catch {
+        setDiscussion((prev) => [...prev, {
+          agentId: agent.id,
+          label: agent.label,
+          text: "Unable to connect.",
+        }]);
       }
-    } else {
-      // Start recording
-      startRecording();
     }
-  }
-
-  if (loungeMessages.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-[#0891B2] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm text-[#64748B]">Connecting to care team…</p>
-        </div>
-      </div>
-    );
+    setActiveAgent(null);
+    setIsRunning(false);
   }
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full bg-[#09090b]">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0] shrink-0">
+      <div className="flex items-center gap-3 px-5 h-[52px] border-b border-white/[0.06] bg-[#111113] shrink-0">
+        <Users size={16} className="text-[#6366f1]" />
         <div>
-          <h2 className="text-xl font-semibold text-[#1E293B]">Care Team Lounge</h2>
-          <p className="text-sm text-[#64748B]">Your care team discusses your plan here</p>
+          <h2 className="text-[13px] font-semibold text-[#fafafa] tracking-[-0.01em]">Care Team Lounge</h2>
+          <p className="text-[10px] text-[#52525b]">Submit a topic for multi-agent discussion</p>
         </div>
-        <button
-          onClick={() => setMuted((m) => !m)}
-          className="p-2 rounded-lg text-[#64748B] hover:text-[#0891B2] hover:bg-[#F0FDFA] transition-colors"
-          title={muted ? "Unmute" : "Mute"}
-        >
-          {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-        </button>
       </div>
 
-      {/* Feed */}
-      <div className="flex-1 overflow-y-auto py-2">
-        {loungeMessages.map((msg) => (
-          <MessageRow key={msg.id} msg={msg} />
-        ))}
-
-        {isStreaming && (
-          <div className="flex items-start gap-3 px-4 py-3">
-            <div className="w-9 h-9 rounded-full bg-[#0891B2] flex items-center justify-center shrink-0 typing-pulse">
-              <Pill size={16} className="text-white" />
+      {/* Agent row */}
+      <div className="flex items-center gap-5 px-5 py-3 border-b border-white/[0.04] bg-white/[0.01] shrink-0">
+        {AGENTS.map((a) => (
+          <div key={a.id} className="flex items-center gap-2">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-semibold transition-all duration-300 ${activeAgent === a.id
+                ? "bg-[#6366f1]/15 text-[#818cf8] ring-1 ring-[#6366f1]/30"
+                : "bg-white/[0.04] text-[#52525b]"
+              }`}>
+              {a.initial}
             </div>
-            <div className="flex gap-1 items-center h-9">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#94A3B8] typing-pulse" style={{ animationDelay: "0ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-[#94A3B8] typing-pulse" style={{ animationDelay: "300ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-[#94A3B8] typing-pulse" style={{ animationDelay: "600ms" }} />
+            <div>
+              <span className="text-[11px] text-[#a1a1aa] block leading-none">{a.label}</span>
+              <span className={`text-[9px] ${activeAgent === a.id ? "text-[#6366f1]" : "text-[#3f3f46]"}`}>
+                {activeAgent === a.id ? "Thinking…" : "Online"}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Discussion feed */}
+      <div ref={feedRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+        {discussion.length === 0 && !isRunning && (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center max-w-[280px]">
+              <div className="w-10 h-10 rounded-full bg-white/[0.03] flex items-center justify-center mx-auto mb-3">
+                <Users size={16} className="text-[#3f3f46]" />
+              </div>
+              <p className="text-[12px] text-[#52525b] leading-relaxed">
+                Enter a topic below to start a roundtable discussion with all three care agents.
+              </p>
             </div>
           </div>
         )}
 
-        <div ref={bottomRef} />
+        {discussion.map((entry, i) => (
+          <div
+            key={i}
+            className="rounded-lg border border-white/[0.06] bg-[#111113] p-3.5"
+            style={{ animation: "fade-in 0.25s ease" }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-5 h-5 rounded-full bg-[#6366f1]/10 flex items-center justify-center">
+                <span className="text-[8px] font-bold text-[#818cf8]">
+                  {entry.label.charAt(0)}
+                </span>
+              </div>
+              <span className="text-[11px] font-medium text-[#a1a1aa]">{entry.label} Agent</span>
+            </div>
+            <p className="text-[12px] text-[#71717a] leading-[1.7] whitespace-pre-wrap">{entry.text}</p>
+          </div>
+        ))}
+
+        {isRunning && activeAgent && (
+          <div className="rounded-lg border border-white/[0.06] bg-[#111113] p-3.5 opacity-60">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full bg-[#6366f1]/10 flex items-center justify-center">
+                <span className="text-[8px] font-bold text-[#818cf8]">
+                  {AGENTS.find((a) => a.id === activeAgent)?.initial}
+                </span>
+              </div>
+              <span className="text-[11px] text-[#52525b]">
+                {AGENTS.find((a) => a.id === activeAgent)?.label} is thinking…
+              </span>
+              <span className="flex gap-0.5 ml-1">
+                {[0, 150, 300].map((d) => (
+                  <span key={d} className="w-1 h-1 rounded-full bg-[#6366f1]/40 typing-pulse" style={{ animationDelay: `${d}ms` }} />
+                ))}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Recording status banner */}
-      {(isRecording || isTranscribing) && (
-        <div className={`px-6 py-2 text-center text-xs font-medium tracking-wide ${isRecording
-          ? "bg-red-50 text-red-600 border-t border-red-100"
-          : "bg-amber-50 text-amber-600 border-t border-amber-100"
-          }`}>
-          {isRecording ? (
-            <span className="flex items-center justify-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              Recording — click 🎤 again to stop
-            </span>
-          ) : (
-            <span className="flex items-center justify-center gap-2">
-              <span className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-              Transcribing your voice…
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Input */}
-      <div className="px-6 py-4 border-t border-[#E2E8F0] shrink-0">
-        <div className="flex gap-2">
+      {/* Topic input */}
+      <div className="px-4 pb-3 pt-2 bg-[#09090b] border-t border-white/[0.04] shrink-0">
+        <div className="flex items-center gap-2 rounded-lg bg-[#111113] border border-white/[0.06] focus-within:border-[#6366f1]/25 transition-colors p-1">
           <input
             type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-            placeholder="Ask the care team..."
-            className="flex-1 px-4 py-2.5 rounded-lg border border-[#E2E8F0] text-sm text-[#1E293B] placeholder:text-[#94A3B8] outline-none focus:ring-2 focus:ring-[#0891B2]/30 focus:border-[#0891B2] transition-all duration-200 bg-white"
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleStart()}
+            placeholder="Enter a topic for the care team…"
+            disabled={isRunning}
+            className="flex-1 bg-transparent text-[13px] text-[#fafafa] placeholder:text-[#3f3f46] outline-none px-3 py-2"
           />
-          {/* Toggle mic button */}
           <button
-            onClick={toggleMic}
-            disabled={isStreaming || isTranscribing}
-            className={`px-4 py-2.5 rounded-lg transition-all duration-200 flex items-center gap-1.5 ${isRecording
-              ? "bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/30"
-              : "bg-[#F1F5F9] hover:bg-[#E2E8F0] text-[#64748B] hover:text-[#0891B2]"
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            title={isRecording ? "Stop recording" : "Start recording"}
+            onClick={handleStart}
+            disabled={!topic.trim() || isRunning}
+            className="flex items-center justify-center w-8 h-8 rounded-md bg-[#6366f1] hover:bg-[#818cf8] text-white disabled:opacity-20 transition-all duration-150 shrink-0"
           >
-            <Mic size={16} />
-          </button>
-          <button
-            onClick={submit}
-            disabled={isStreaming}
-            className="px-4 py-2.5 bg-[#0891B2] hover:bg-[#0E7490] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors duration-200 flex items-center gap-1.5"
-          >
-            <Send size={16} />
+            <Send size={13} />
           </button>
         </div>
       </div>

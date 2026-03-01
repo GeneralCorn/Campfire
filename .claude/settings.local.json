@@ -5,7 +5,10 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:docs.langchain.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npm run:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(python3:*)"
     ]
   }
 }

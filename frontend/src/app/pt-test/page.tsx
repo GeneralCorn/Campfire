@@ -19,7 +19,6 @@ export default function PTTestPage() {
                     PT Camera Test
                 </h1>
                 <LivePTCamera
-                    minAngle={140}
                     onBreach={(angle) => console.log(`⚠️ Breach detected: ${angle}°`)}
                 />
                 <p className="max-w-md text-center text-sm text-neutral-500">
