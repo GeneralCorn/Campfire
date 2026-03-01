@@ -2,7 +2,7 @@
 
 import {
   Users, Pill, HeartPulse, ShieldAlert, ClipboardList,
-  ChevronDown, Settings,
+  ChevronDown, Settings, Dumbbell,
 } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";
 import type { RoomId } from "@/types";
@@ -24,6 +24,7 @@ const AGENT_ROOMS: RoomItem[] = [
   { id: "medication-room", name: "Medication Room", Icon: Pill,        color: "#0891B2" },
   { id: "recovery-room",   name: "Recovery Room",   Icon: HeartPulse,  color: "#059669" },
   { id: "emergency-room",  name: "Emergency Room",  Icon: ShieldAlert, color: "#DC2626" },
+  { id: "pt-studio",       name: "PT Studio",       Icon: Dumbbell,    color: "#6366f1" },
 ];
 
 const CARE_PLAN: RoomItem[] = [

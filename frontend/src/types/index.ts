@@ -88,10 +88,13 @@ export type RoomId =
   | "medication-room"
   | "recovery-room"
   | "emergency-room"
+  | "pt-studio"
   | "overview"
   | "medications"
   | "restrictions"
   | "warning-signs";
+
+export type AgentRoomId = "medication-room" | "recovery-room" | "emergency-room";
 
 export type AgentName = "Medication Agent" | "Recovery Agent" | "Emergency Agent";
 
@@ -172,15 +175,43 @@ export interface SSEEvent {
   [key: string]: unknown;
 }
 
+// ── Medication visualizer types (from Modal medication_visualizer.py) ──────────
+
+export interface ScheduledMedication {
+  name: string;
+  dosage: string;
+  frequency: string;
+  instructions: string;
+  color: string;
+}
+
+export type SlotId = "morning" | "afternoon" | "evening" | "night";
+
+export interface ScheduleSlot {
+  slot_id: SlotId;
+  label: string;
+  hours: string;
+  color: string;
+  medications: ScheduledMedication[];
+}
+
+export interface VisualData {
+  image_base64: string;
+  schedule: ScheduleSlot[];
+  medication_count: number;
+}
+
 export interface SandboxEntry {
   id: string;
   teammateId: TeammateId;
   type: "log" | "write" | "flag";
   text: string;
   timestamp: number;
-  model?: string;      // "vlm" | "mediapipe" | "mistral" | "research" | "biobert" | "viz" | "fda"
-  gpuTier?: string;    // "T4" | "A10G" | "H100" etc.
-  packages?: string[]; // pip packages installed in the sandbox
+  model?: string;           // "vlm" | "mediapipe" | "mistral" | "research" | "biobert" | "viz" | "fda"
+  gpuTier?: string;         // "T4" | "A10G" | "H100" etc.
+  packages?: string[];      // pip packages installed in the sandbox
+  executionContext?: "modal-gpu" | "modal-cpu" | "browser";
+  gpuName?: string;         // e.g. "NVIDIA A10G · 24 GB VRAM"
 }
 
 export interface ArtifactSection {

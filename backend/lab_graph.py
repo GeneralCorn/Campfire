@@ -43,6 +43,15 @@ ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
 ELEVENLABS_OUTPUT_FORMAT = os.getenv("ELEVENLABS_OUTPUT_FORMAT", "pcm_24000")
 
+# Observability: human-readable GPU names for the PipelineGraph tooltip
+GPU_FULL_NAMES: dict[str, str] = {
+    "A10G": "NVIDIA A10G · 24 GB VRAM",
+    "A100": "NVIDIA A100 · 40 GB VRAM",
+    "H100": "NVIDIA H100 · 80 GB VRAM",
+    "L4":   "NVIDIA L4 · 24 GB VRAM",
+    "T4":   "NVIDIA T4 · 16 GB VRAM",
+}
+
 
 # ---------------------------------------------------------------------------
 # State
@@ -457,6 +466,8 @@ def maya_sandbox_node(state: LabState) -> dict:
             "model": "vlm",
             "packages": ["transformers", "torch", "Pillow"],
             "gpu": gpu,
+            "execution_context": "modal-gpu",
+            "gpu_name": GPU_FULL_NAMES.get(str(gpu), f"GPU: {gpu}"),
         })
         print(f"[MAYA] VLM mode: {vlm_label}")
         result = run_in_sandbox(
@@ -472,6 +483,7 @@ def maya_sandbox_node(state: LabState) -> dict:
             "model": "mediapipe",
             "packages": ["mediapipe", "opencv-python-headless"],
             "gpu": None,
+            "execution_context": "browser",
         })
         # Extract wrist/elbow PT restrictions from patient context
         pt_ctx = state.get("patient_context") or {}
@@ -505,7 +517,9 @@ def maya_sandbox_node(state: LabState) -> dict:
             "teammate": "maya",
             "model": "mistral",
             "packages": [],
-            "gpu": None,
+            "gpu": "A10G",
+            "execution_context": "modal-gpu",
+            "gpu_name": GPU_FULL_NAMES["A10G"],
         })
         # Placeholder — swap in real code when Mistral sandbox endpoint is wired
         result = run_in_sandbox(
@@ -525,6 +539,7 @@ def maya_sandbox_node(state: LabState) -> dict:
             "model": "fallback",
             "packages": [],
             "gpu": None,
+            "execution_context": "modal-cpu",
         })
         result = run_in_sandbox(
             code="print('[Maya] No model selected — check router flags')\n",
@@ -606,6 +621,7 @@ def rex_sandbox_node(state: LabState) -> dict:
         "model": "fda",
         "packages": ["requests"],
         "gpu": None,
+        "execution_context": "modal-cpu",
     })
 
     result = run_in_sandbox(
@@ -711,6 +727,7 @@ def sol_sandbox_node(state: LabState) -> dict:
         "model": "viz",
         "packages": ["flask", "jinja2", "matplotlib"],
         "gpu": None,
+        "execution_context": "modal-cpu",
     })
 
     result = run_in_sandbox(

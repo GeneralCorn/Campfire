@@ -305,6 +305,16 @@ export function useTeamChat() {
             ].filter(Boolean).join(" · ");
             setPipelineNodeStatus(nodeId, "sandbox", detail || undefined);
           }
+
+          // Execution context — use value from backend, with client-side fallback
+          const rawCtx = data.execution_context as string | undefined;
+          const executionContext =
+            rawCtx === "modal-gpu" || rawCtx === "modal-cpu" || rawCtx === "browser"
+              ? rawCtx
+              : (data.model as string) === "mediapipe" ? "browser"
+              : data.gpu ? "modal-gpu"
+              : "modal-cpu";
+
           addSandboxEntry({
             id: `sb-spawn-${Date.now()}-${Math.random()}`,
             teammateId: teammate,
@@ -314,6 +324,8 @@ export function useTeamChat() {
             model: (data.model as string) ?? undefined,
             gpuTier: data.gpu ? (data.gpu as string) : undefined,
             packages: data.packages ? (data.packages as string[]) : undefined,
+            executionContext,
+            gpuName: data.gpu_name ? (data.gpu_name as string) : undefined,
           });
         }
         break;

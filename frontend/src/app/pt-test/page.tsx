@@ -19,11 +19,11 @@ export default function PTTestPage() {
                     PT Camera Test
                 </h1>
                 <LivePTCamera
-                    minAngle={140}
+                    exercise="wrist_flexion"
                     onBreach={(angle) => console.log(`⚠️ Breach detected: ${angle}°`)}
                 />
                 <p className="max-w-md text-center text-sm text-neutral-500">
-                    Hold your right arm in front of the camera. Flex your wrist below 140° to trigger a breach.
+                    Hold your right arm in front of the camera. Flex your wrist — a breach is detected when the joint angle drops below the threshold.
                 </p>
             </div>
         </div>

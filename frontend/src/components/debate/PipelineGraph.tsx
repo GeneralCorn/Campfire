@@ -94,6 +94,8 @@ interface GNode {
   doneT?: number;
   startedAt?: number;
   completedAt?: number;
+  executionContext?: "modal-gpu" | "modal-cpu" | "browser";
+  gpuName?: string;
 }
 
 interface GEdge {
@@ -281,12 +283,20 @@ function syncFromStore(g: GState) {
         const idx = idxPerAgent[agent] - 1;
         const [stx, sty] = sandboxTarget(parent, idx, total);
 
-        const hasGpu = sp.gpuTier !== undefined || sp.text.includes("GPU");
-        const MODEL_SHORT: Record<string, string> = {
-          vlm: "VLM", mediapipe: "MP", mistral: "LLM",
+        const ctx = sp.executionContext
+          ?? ((sp.model === "mediapipe") ? "browser"
+            : sp.gpuTier ? "modal-gpu" : "modal-cpu");
+        const hasGpu = ctx === "modal-gpu";
+        const isBrowser = ctx === "browser";
+
+        const MODEL_SHORT_MAP: Record<string, string> = {
+          vlm: "VLM", mediapipe: "Pose", mistral: "LLM",
           research: "PubMed", biobert: "NER", viz: "Viz", fda: "FDA",
         };
-        const modelLabel = MODEL_SHORT[sp.model ?? ""] ?? "SB";
+        const modelLabel = MODEL_SHORT_MAP[sp.model ?? ""]
+          ?? (isBrowser ? "Browser" : "CPU");
+
+        const nodeColor = hasGpu ? "#7c3aed" : isBrowser ? "#059669" : "#0891B2";
 
         g.nodes.set(satId, {
           id: satId,
@@ -299,7 +309,7 @@ function syncFromStore(g: GState) {
           tx: stx,
           ty: sty,
           r: hasGpu ? SAT_R + 5 : SAT_R,
-          color: hasGpu ? "#7c3aed" : "#0891B2",
+          color: nodeColor,
           label: modelLabel,
           status: "sandbox",
           gpu: hasGpu,
@@ -307,6 +317,8 @@ function syncFromStore(g: GState) {
           gpuTier: sp.gpuTier,
           packages: sp.packages,
           spawnT: Date.now(),
+          executionContext: ctx,
+          gpuName: sp.gpuName,
         });
 
         g.edges.push({ from: agent, to: satId, type: "tether" });
@@ -694,46 +706,111 @@ export function PipelineGraph() {
           }}
         />
 
-        {/* Sandbox click popup */}
+        {/* Sandbox click popup — rich context-aware info card */}
         {tooltip && (() => {
-          const info = MODEL_FULL[tooltip.node.model ?? ""];
-          const elapsed = tooltip.node.doneT && tooltip.node.spawnT
-            ? ((tooltip.node.doneT - tooltip.node.spawnT) / 1000).toFixed(1) + "s"
-            : tooltip.node.status === "sandbox" ? "running…" : null;
+          const { node } = tooltip;
+          const info = MODEL_FULL[node.model ?? ""];
+          const ctx = node.executionContext ?? (node.gpu ? "modal-gpu" : "modal-cpu");
+          const elapsed = node.doneT && node.spawnT
+            ? ((node.doneT - node.spawnT) / 1000).toFixed(1) + "s"
+            : node.status === "sandbox" ? "running…" : null;
+
+          const isGpu     = ctx === "modal-gpu";
+          const isBrowser = ctx === "browser";
+
+          const accent  = isGpu ? "#7c3aed" : isBrowser ? "#059669" : "#0891B2";
+          const bandBg  = isGpu ? "#faf5ff" : isBrowser ? "#f0fdf4" : "#f0fdfa";
+          const bandBdr = isGpu ? "#e9d5ff" : isBrowser ? "#bbf7d0" : "#99f6e4";
+          const tagBg   = isGpu ? "#ede9fe" : isBrowser ? "#dcfce7" : "#ccfbf1";
+          const tagText = isGpu ? "#6d28d9" : isBrowser ? "#15803d" : "#0e7490";
+
+          const headerLabel = isGpu
+            ? "⚡ Modal GPU Sandbox"
+            : isBrowser
+            ? "🌐 Runs in Your Browser"
+            : "☁ Modal CPU Sandbox";
+
           return (
             <div
-              className="absolute z-20 w-52 bg-white border border-[#E2E8F0] rounded-lg shadow-lg p-3 text-[11px] pointer-events-none"
-              style={{ left: Math.min(tooltip.cx + 10, W - 220), top: Math.max(tooltip.cy - 60, 4) }}
+              className="absolute z-20 w-72 bg-white rounded-xl shadow-xl overflow-hidden text-[11px]"
+              style={{
+                left: Math.min(tooltip.cx + 10, W - 296),
+                top: Math.max(tooltip.cy - 60, 4),
+                border: `1px solid ${bandBdr}`,
+              }}
             >
-              <div className="font-semibold text-[#1E293B] mb-1">
-                {info?.name ?? tooltip.node.label}
-              </div>
-              {info?.why && (
-                <div className="text-[#0891B2] leading-snug mb-1.5 font-medium">{info.why}</div>
-              )}
-              {info?.what && (
-                <div className="text-[#64748B] leading-snug mb-2">{info.what}</div>
-              )}
-              {tooltip.node.packages && tooltip.node.packages.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {tooltip.node.packages.map((pkg) => (
-                    <span key={pkg} className="px-1 py-0.5 rounded text-[9px] font-mono bg-[#F1F5F9] text-[#475569]">
-                      {pkg}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {tooltip.node.gpu ? (
-                  <span className="px-1.5 py-0.5 rounded font-mono bg-purple-100 text-purple-700">
-                    GPU · {tooltip.node.gpuTier ?? "GPU"}
+              {/* Header band */}
+              <div
+                className="flex items-center justify-between px-3 py-2"
+                style={{ background: bandBg, borderBottom: `1px solid ${bandBdr}` }}
+              >
+                <span className="font-semibold text-[12px]" style={{ color: accent }}>
+                  {headerLabel}
+                </span>
+                {isGpu && node.gpuName && (
+                  <span className="text-[10px] font-mono ml-2 shrink-0" style={{ color: accent }}>
+                    {node.gpuName}
                   </span>
-                ) : (
-                  <span className="px-1.5 py-0.5 rounded font-mono bg-[#F0FDFA] text-[#0891B2]">CPU</span>
                 )}
-                {elapsed && (
-                  <span className="text-[#94A3B8] font-mono">{elapsed}</span>
+              </div>
+
+              <div className="p-3 space-y-2">
+                {/* Model name */}
+                <div className="font-semibold text-[#1E293B] text-[12px]">
+                  {info?.name ?? node.label}
+                </div>
+
+                {/* Why triggered */}
+                {info?.why && (
+                  <div className="leading-snug" style={{ color: accent }}>{info.why}</div>
                 )}
+
+                {/* What it does */}
+                {info?.what && (
+                  <div className="text-[#64748B] leading-snug">{info.what}</div>
+                )}
+
+                {/* Browser: PT Camera CTA */}
+                {isBrowser && (
+                  <button
+                    className="w-full text-left text-[11px] font-medium rounded-lg px-2.5 py-1.5 transition-colors"
+                    style={{
+                      background: tagBg,
+                      border: `1px solid ${bandBdr}`,
+                      color: tagText,
+                    }}
+                    onClick={() => {
+                      useAppStore.getState().setActiveRoom("pt-studio");
+                      setTooltip(null);
+                    }}
+                  >
+                    → Open PT Camera to run live pose tracking
+                  </button>
+                )}
+
+                {/* Packages */}
+                {node.packages && node.packages.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {node.packages.map((pkg) => (
+                      <span key={pkg} className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#F1F5F9] text-[#475569]">
+                        {pkg}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Footer: context badge + elapsed */}
+                <div className="flex items-center justify-between pt-0.5">
+                  <span
+                    className="px-2 py-0.5 rounded-full text-[10px] font-mono"
+                    style={{ background: tagBg, color: tagText }}
+                  >
+                    {isGpu ? `GPU · ${node.gpuTier ?? "A10G"}` : isBrowser ? "browser" : "CPU"}
+                  </span>
+                  {elapsed && (
+                    <span className="text-[#94A3B8] font-mono text-[10px]">{elapsed}</span>
+                  )}
+                </div>
               </div>
             </div>
           );

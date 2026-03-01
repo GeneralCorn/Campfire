@@ -9,6 +9,7 @@ import { ChannelSidebar } from "./ChannelSidebar";
 import { RightPanel } from "./RightPanel";
 import { CareTeamLounge } from "@/components/rooms/CareTeamLounge";
 import { AgentRoom } from "@/components/rooms/AgentRoom";
+import { PTRoom } from "@/components/rooms/PTRoom";
 import { generateLoungeConversation } from "@/lib/lounge";
 import type { DischargeState, RoomId } from "@/types";
 
@@ -19,13 +20,14 @@ const ROOM_NAMES: Record<RoomId, string> = {
   "medication-room":"Medication Room",
   "recovery-room":  "Recovery Room",
   "emergency-room": "Emergency Room",
+  "pt-studio":      "PT Studio",
   "overview":       "Overview",
   "medications":    "Medications",
   "restrictions":   "Restrictions",
   "warning-signs":  "Warning Signs",
 };
 
-const ROOM_VIEWS = new Set<RoomId>(["lounge", "medication-room", "recovery-room", "emergency-room"]);
+const ROOM_VIEWS = new Set<RoomId>(["lounge", "medication-room", "recovery-room", "emergency-room", "pt-studio"]);
 
 // ── Top Bar ───────────────────────────────────────────────────────────────────
 
@@ -395,6 +397,7 @@ function MainContent() {
     case "medication-room": return <AgentRoom key="medication-room" roomId="medication-room" />;
     case "recovery-room":   return <AgentRoom key="recovery-room"   roomId="recovery-room" />;
     case "emergency-room":  return <AgentRoom key="emergency-room"  roomId="emergency-room" />;
+    case "pt-studio":       return <PTRoom />;
     case "overview":        return discharge ? <OverviewPanel d={discharge} />     : <LoadingSpinner />;
     case "medications":     return discharge ? <MedicationsPanel d={discharge} />  : <LoadingSpinner />;
     case "restrictions":    return discharge ? <RestrictionsPanel d={discharge} /> : <LoadingSpinner />;
