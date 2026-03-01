@@ -1,14 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dumbbell } from "lucide-react";
 import LivePTCamera, { EXERCISES, type ExerciseId } from "@/components/LivePTCamera";
+import { useAppStore } from "@/stores/useAppStore";
 
 const EXERCISE_LIST = Object.values(EXERCISES);
 
 export function PTRoom() {
-  const [selectedExercise, setSelectedExercise] = useState<ExerciseId>("bicep_curl");
+  const ptExercise = useAppStore((s) => s.ptExercise);
+  const setPtExercise = useAppStore((s) => s.setPtExercise);
+  const [selectedExercise, setSelectedExercise] = useState<ExerciseId>(ptExercise ?? "bicep_curl");
   const [totalReps, setTotalReps] = useState(0);
+
+  // Apply any exercise pre-selected by the chat router then clear the store value
+  useEffect(() => {
+    if (ptExercise) {
+      setSelectedExercise(ptExercise);
+      setTotalReps(0);
+      setPtExercise(null);
+    }
+  }, [ptExercise, setPtExercise]);
   const ex = EXERCISES[selectedExercise];
 
   return (

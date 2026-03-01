@@ -89,6 +89,7 @@ export type RoomId =
   | "recovery-room"
   | "emergency-room"
   | "pt-studio"
+  | "scan-room"
   | "overview"
   | "medications"
   | "restrictions"
@@ -175,6 +176,10 @@ export interface SSEEvent {
   [key: string]: unknown;
 }
 
+// ── PT Studio exercise IDs (mirrors LivePTCamera.tsx EXERCISES keys) ─────────
+
+export type ExerciseId = "bicep_curl" | "squat" | "shoulder_abduction" | "knee_extension" | "wrist_flexion";
+
 // ── Medication visualizer types (from Modal medication_visualizer.py) ──────────
 
 export interface ScheduledMedication {
@@ -218,6 +223,7 @@ export interface ArtifactSection {
   id?: string;
   heading: string;
   content: string;
+  html?: string;
   type?: string;
   authorId?: string;
 }

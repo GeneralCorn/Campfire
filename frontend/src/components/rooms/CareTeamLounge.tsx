@@ -6,6 +6,7 @@ import { useAppStore } from "@/stores/useAppStore";
 import { useTeamChat } from "@/hooks/useSSE";
 import { TaskInput } from "@/components/team-room/TaskInput";
 import { PipelineGraph } from "@/components/debate/PipelineGraph";
+import { ArtifactPanel } from "@/components/debate/ArtifactPanel";
 import { Avatar } from "@/components/team-room/Avatar";
 import type { Message, TeammateId } from "@/types";
 
@@ -200,9 +201,12 @@ export function CareTeamLounge() {
         </div>
       </div>
 
-      {/* ── Right: PipelineGraph ── */}
+      {/* ── Right: PipelineGraph + artifacts ── */}
       <div className="w-[340px] shrink-0 bg-[#F8FAFC] border-l border-[#E2E8F0] flex flex-col">
-        <PipelineGraph />
+        <div className="flex-1 min-h-0">
+          <PipelineGraph />
+        </div>
+        <ArtifactPanel />
       </div>
     </div>
   );

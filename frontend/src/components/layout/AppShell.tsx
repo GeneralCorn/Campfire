@@ -7,9 +7,11 @@ import {
 import { useAppStore } from "@/stores/useAppStore";
 import { ChannelSidebar } from "./ChannelSidebar";
 import { RightPanel } from "./RightPanel";
+import { CaptionOverlay } from "@/components/CaptionOverlay";
 import { CareTeamLounge } from "@/components/rooms/CareTeamLounge";
 import { AgentRoom } from "@/components/rooms/AgentRoom";
 import { PTRoom } from "@/components/rooms/PTRoom";
+import { ScanRoom } from "@/components/rooms/ScanRoom";
 import { generateLoungeConversation } from "@/lib/lounge";
 import type { DischargeState, RoomId } from "@/types";
 
@@ -21,13 +23,14 @@ const ROOM_NAMES: Record<RoomId, string> = {
   "recovery-room":  "Recovery Room",
   "emergency-room": "Emergency Room",
   "pt-studio":      "PT Studio",
+  "scan-room":      "Rx Scanner",
   "overview":       "Overview",
   "medications":    "Medications",
   "restrictions":   "Restrictions",
   "warning-signs":  "Warning Signs",
 };
 
-const ROOM_VIEWS = new Set<RoomId>(["lounge", "medication-room", "recovery-room", "emergency-room", "pt-studio"]);
+const ROOM_VIEWS = new Set<RoomId>(["lounge", "medication-room", "recovery-room", "emergency-room", "pt-studio", "scan-room"]);
 
 // ── Top Bar ───────────────────────────────────────────────────────────────────
 
@@ -275,6 +278,11 @@ function MedicationsPanel({ d }: { d: DischargeState }) {
             <div className="flex items-baseline gap-2 mb-1">
               <span className="text-base font-medium text-[#1E293B]">{m.name}</span>
               <span className="text-sm text-[#64748B]">{m.dosage}</span>
+              {m.domain_flags?.includes("rx-scan") && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#F0FDFA] text-[#0891B2] border border-[#0891B2]/25 font-medium">
+                  Rx Scan
+                </span>
+              )}
             </div>
             <p className="text-sm text-[#64748B] mb-1">{m.frequency}</p>
             <p className="text-sm text-[#1E293B]">{m.instructions}</p>
@@ -398,6 +406,7 @@ function MainContent() {
     case "recovery-room":   return <AgentRoom key="recovery-room"   roomId="recovery-room" />;
     case "emergency-room":  return <AgentRoom key="emergency-room"  roomId="emergency-room" />;
     case "pt-studio":       return <PTRoom />;
+    case "scan-room":       return <ScanRoom />;
     case "overview":        return discharge ? <OverviewPanel d={discharge} />     : <LoadingSpinner />;
     case "medications":     return discharge ? <MedicationsPanel d={discharge} />  : <LoadingSpinner />;
     case "restrictions":    return discharge ? <RestrictionsPanel d={discharge} /> : <LoadingSpinner />;
@@ -445,6 +454,7 @@ export function AppShell() {
         </div>
         {rightPanelOpen && <RightPanel />}
       </div>
+      <CaptionOverlay />
     </div>
   );
 }

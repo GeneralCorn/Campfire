@@ -45,6 +45,24 @@ const MODEL_FULL: Record<string, { name: string; why: string; what: string }> = 
   fda:       { name: "OpenFDA + RxNorm", why: "Medication names found — cross-referencing FDA safety database", what: "Queries OpenFDA drug labels and RxNorm for interactions and adverse event reports" },
 };
 
+// Package-based fallback: infer task from installed packages when model key is missing
+const PACKAGE_TASK: [string[], { name: string; summary: string }][] = [
+  [["flask", "jinja2", "matplotlib"],            { name: "HTML Medication Visualizer", summary: "Running matplotlib + Jinja2 to render a drug-timing and interaction chart" }],
+  [["requests", "pandas"],                       { name: "OpenFDA + RxNorm Lookup",   summary: "Querying OpenFDA drug labels and RxNorm API to cross-check safety and interactions" }],
+  [["requests"],                                 { name: "OpenFDA Drug Lookup",        summary: "Fetching drug safety data and adverse-event reports from OpenFDA" }],
+  [["transformers", "torch", "Pillow"],          { name: "Florence-2 VLM",            summary: "Running vision-language model to read and decode the uploaded medical image" }],
+  [["mediapipe", "opencv-python-headless"],      { name: "MediaPipe Pose",             summary: "Estimating joint angles via MediaPipe to measure wrist/elbow range of motion" }],
+];
+
+function inferFromPackages(pkgs: string[] | undefined): { name: string; summary: string } | null {
+  if (!pkgs || pkgs.length === 0) return null;
+  const lower = pkgs.map((p) => p.toLowerCase());
+  for (const [keys, info] of PACKAGE_TASK) {
+    if (keys.every((k) => lower.some((p) => p.includes(k)))) return info;
+  }
+  return null;
+}
+
 // Sandbox square half-dimensions
 const SB_HW = 26;
 const SB_HH = 17;
@@ -493,16 +511,16 @@ function render(ctx: CanvasRenderingContext2D, g: GState, ch = H_INIT) {
           const a0 = g.tick * 0.05, a1 = g.tick * -0.04, a2 = g.tick * 0.07;
           ctx.strokeStyle = "#7c3aed";
           ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(n.x, n.y, arcR,     a0, a0 + Math.PI * (80 / 180)); ctx.stroke();
-          ctx.beginPath(); ctx.arc(n.x, n.y, arcR - 4, a1, a1 + Math.PI * (55 / 180)); ctx.stroke();
+          ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(arcR, 1),     a0, a0 + Math.PI * (80 / 180)); ctx.stroke();
+          ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(arcR - 4, 1), a1, a1 + Math.PI * (55 / 180)); ctx.stroke();
           ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.arc(n.x, n.y, arcR - 8, a2, a2 + Math.PI * (30 / 180)); ctx.stroke();
+          ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(arcR - 8, 1), a2, a2 + Math.PI * (30 / 180)); ctx.stroke();
         } else {
           const a1 = g.tick * 0.04;
           ctx.strokeStyle = "#0891B2";
           ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.arc(n.x, n.y, arcR, a1,              a1 + Math.PI * 0.4); ctx.stroke();
-          ctx.beginPath(); ctx.arc(n.x, n.y, arcR, a1 + Math.PI,    a1 + Math.PI * 1.4); ctx.stroke();
+          ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(arcR, 1), a1,              a1 + Math.PI * 0.4); ctx.stroke();
+          ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(arcR, 1), a1 + Math.PI,    a1 + Math.PI * 1.4); ctx.stroke();
         }
       }
 
@@ -710,6 +728,8 @@ export function PipelineGraph() {
         {tooltip && (() => {
           const { node } = tooltip;
           const info = MODEL_FULL[node.model ?? ""];
+          const pkgFallback = !info ? inferFromPackages(node.packages) : null;
+          const displayName = info?.name ?? pkgFallback?.name ?? node.label;
           const ctx = node.executionContext ?? (node.gpu ? "modal-gpu" : "modal-cpu");
           const elapsed = node.doneT && node.spawnT
             ? ((node.doneT - node.spawnT) / 1000).toFixed(1) + "s"
@@ -747,25 +767,40 @@ export function PipelineGraph() {
                 <span className="font-semibold text-[12px]" style={{ color: accent }}>
                   {headerLabel}
                 </span>
-                {isGpu && node.gpuName && (
-                  <span className="text-[10px] font-mono ml-2 shrink-0" style={{ color: accent }}>
-                    {node.gpuName}
-                  </span>
-                )}
+                <div className="flex items-center gap-1 ml-2 shrink-0">
+                  {isGpu && node.gpuName && (
+                    <span className="text-[10px] font-mono" style={{ color: accent }}>
+                      {node.gpuName}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setTooltip(null)}
+                    className="p-0.5 rounded hover:bg-black/10 transition-colors cursor-pointer"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
               </div>
 
               <div className="p-3 space-y-2">
                 {/* Model name */}
                 <div className="font-semibold text-[#1E293B] text-[12px]">
-                  {info?.name ?? node.label}
+                  {displayName}
                 </div>
 
-                {/* Why triggered */}
+                {/* Running summary — package-inferred when model key is missing */}
+                {pkgFallback?.summary && (
+                  <div className="text-[10px] font-mono leading-snug" style={{ color: accent }}>
+                    ▶ {pkgFallback.summary}
+                  </div>
+                )}
+
+                {/* Why triggered (from MODEL_FULL) */}
                 {info?.why && (
                   <div className="leading-snug" style={{ color: accent }}>{info.why}</div>
                 )}
 
-                {/* What it does */}
+                {/* What it does (from MODEL_FULL) */}
                 {info?.what && (
                   <div className="text-[#64748B] leading-snug">{info.what}</div>
                 )}

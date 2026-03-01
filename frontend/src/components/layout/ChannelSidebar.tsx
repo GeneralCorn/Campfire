@@ -2,7 +2,7 @@
 
 import {
   Users, Pill, HeartPulse, ShieldAlert, ClipboardList,
-  ChevronDown, Settings, Dumbbell,
+  ChevronDown, Settings, Dumbbell, ScanLine,
 } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";
 import type { RoomId } from "@/types";
@@ -25,6 +25,7 @@ const AGENT_ROOMS: RoomItem[] = [
   { id: "recovery-room",   name: "Recovery Room",   Icon: HeartPulse,  color: "#059669" },
   { id: "emergency-room",  name: "Emergency Room",  Icon: ShieldAlert, color: "#DC2626" },
   { id: "pt-studio",       name: "PT Studio",       Icon: Dumbbell,    color: "#6366f1" },
+  { id: "scan-room",       name: "Rx Scanner",      Icon: ScanLine,    color: "#0891B2" },
 ];
 
 const CARE_PLAN: RoomItem[] = [
@@ -50,13 +51,14 @@ function SectionHeader({ title }: { title: string }) {
 // ── ChannelSidebar ────────────────────────────────────────────────────────────
 
 export function ChannelSidebar() {
-  const activeRoom     = useAppStore((s) => s.activeRoom);
-  const setActiveRoom  = useAppStore((s) => s.setActiveRoom);
-  const discharge      = useAppStore((s) => s.discharge);
-  const pulsedRooms    = useAppStore((s) => s.pulsedRooms);
-  const loungeUnread   = useAppStore((s) => s.loungeUnread);
-  const setLoungeUnread = useAppStore((s) => s.setLoungeUnread);
-  const setPulse       = useAppStore((s) => s.setPulse);
+  const activeRoom         = useAppStore((s) => s.activeRoom);
+  const setActiveRoom      = useAppStore((s) => s.setActiveRoom);
+  const discharge          = useAppStore((s) => s.discharge);
+  const discoveredWarnings = useAppStore((s) => s.discoveredWarnings);
+  const pulsedRooms        = useAppStore((s) => s.pulsedRooms);
+  const loungeUnread       = useAppStore((s) => s.loungeUnread);
+  const setLoungeUnread    = useAppStore((s) => s.setLoungeUnread);
+  const setPulse           = useAppStore((s) => s.setPulse);
 
   function handleClick(id: RoomId) {
     setActiveRoom(id);
@@ -90,10 +92,14 @@ export function ChannelSidebar() {
           {room.name}
         </span>
 
-        {/* Warning signs badge */}
-        {room.id === "warning-signs" && discharge && (
-          <span className="text-[10px] font-semibold text-[#D97706] bg-[#D97706]/10 px-1.5 py-0.5 rounded-full">
-            {discharge.warning_signs.length}
+        {/* Warning signs badge — live count from pipeline, hidden until first flag */}
+        {room.id === "warning-signs" && discoveredWarnings.length > 0 && (
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+            activeRoom !== "warning-signs"
+              ? "text-[#DC2626] bg-[#DC2626]/10 animate-pulse"
+              : "text-[#D97706] bg-[#D97706]/10"
+          }`}>
+            {discoveredWarnings.length}
           </span>
         )}
 

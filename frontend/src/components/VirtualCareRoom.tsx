@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useRef, useEffect } from "react";
 import { useUIStore } from "@/stores/useUIStore";
 import { useAppStore } from "@/stores/useAppStore";
 import { useConversation } from "@elevenlabs/react";
@@ -24,18 +24,31 @@ const BACKEND_URL = "http://localhost:8000";
 export default function VirtualCareRoom() {
     const { activeStage, setActiveStage, chartData, setChartData } = useUIStore();
     const discharge = useAppStore((s) => s.discharge);
+    const setCaptionText = useAppStore((s) => s.setCaptionText);
     const [cameraOn, setCameraOn] = useState(false);
 
     /* ── ElevenLabs Conversation ──────────────────────────────────────────── */
     const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
 
+    // Clear caption when component unmounts
+    useEffect(() => {
+        return () => setCaptionText("");
+    }, [setCaptionText]);
+
     const conversation = useConversation({
         onConnect: () => console.log("[VCR] Agent connected"),
         onDisconnect: () => {
             console.log("[VCR] Agent disconnected");
+            setCaptionText("");
             setActiveStage("orb");
         },
         onError: (err) => console.error("[VCR] Agent error:", err),
+        onMessage: (msg) => {
+            // Show agent speech as floating caption for accessibility
+            if (msg.source === "ai" && msg.message) {
+                setCaptionText(msg.message);
+            }
+        },
 
         clientTools: {
             /* ── Tool 1: Medical Record Consultation ─────────────────────────── */
@@ -269,6 +282,7 @@ export default function VirtualCareRoom() {
                             if (conversation.status === "connected") {
                                 await conversation.endSession();
                             }
+                            setCaptionText("");
                             setActiveStage("orb");
                             setCameraOn(false);
                         }}

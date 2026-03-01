@@ -19,9 +19,12 @@ from typing import Optional, Annotated
 from operator import add
 
 import httpx
+from dotenv import load_dotenv
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langgraph.config import get_stream_writer
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env.local"))
 
 from lab_config import LAB_AGENTS
 from lab_sandbox import run_in_sandbox, pick_gpu
@@ -38,7 +41,9 @@ from lab_tools import (
 # ---------------------------------------------------------------------------
 
 MODAL_URL = os.getenv("MODAL_URL", "")
+MODAL_URL_FALLBACK = os.getenv("MODAL_URL_FALLBACK", "https://saibilla21--agentfm-brain-serve-dev.modal.run")
 MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
 ELEVENLABS_OUTPUT_FORMAT = os.getenv("ELEVENLABS_OUTPUT_FORMAT", "pcm_24000")
@@ -124,29 +129,69 @@ def _patient_block(state: LabState) -> str:
 # ---------------------------------------------------------------------------
 
 def _call_modal(system_prompt: str, user_prompt: str, config_id: str = "maya") -> str:
-    """Low-level Modal vLLM call (sync). Returns raw response text."""
-    print(f"[LLM] Calling Modal vLLM ({MODEL_NAME}) for {config_id}...")
-    url = f"{MODAL_URL}/v1/chat/completions"
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0.7,
-        "max_tokens": 2048,
-    }
-    try:
-        with httpx.Client(timeout=120.0) as client:
-            response = client.post(url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            raw_text = data["choices"][0]["message"]["content"]
-        print(f"[LLM] {config_id} responded ({len(raw_text)} chars)")
-        return raw_text
-    except Exception as e:
-        print(f"[LLM] ERROR for {config_id}: {e}")
-        raise
+    """LLM call with fallback: Modal → Modal fallback → Anthropic. Returns raw text."""
+    print(f"[LLM] Calling LLM for {config_id}...")
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    # Build list of Modal URLs to try
+    modal_urls = []
+    if MODAL_URL:
+        modal_urls.append(MODAL_URL)
+    if MODAL_URL_FALLBACK and MODAL_URL_FALLBACK != MODAL_URL:
+        modal_urls.append(MODAL_URL_FALLBACK)
+
+    # Try each Modal endpoint
+    for base_url in modal_urls:
+        url = f"{base_url}/v1/chat/completions"
+        payload = {
+            "model": MODEL_NAME,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 2048,
+        }
+        try:
+            with httpx.Client(timeout=120.0) as client:
+                response = client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                raw_text = data["choices"][0]["message"]["content"]
+            print(f"[LLM] {config_id} success via Modal: {base_url} ({len(raw_text)} chars)")
+            return raw_text
+        except Exception as e:
+            print(f"[LLM] Modal failed ({base_url}): {e}")
+            continue
+
+    # Fallback: Anthropic API
+    if ANTHROPIC_API_KEY:
+        print(f"[LLM] {config_id} falling back to Anthropic API...")
+        try:
+            resp = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 2048,
+                    "system": system_prompt,
+                    "messages": [{"role": "user", "content": user_prompt}],
+                },
+                timeout=120.0,
+            )
+            resp.raise_for_status()
+            raw_text = resp.json()["content"][0]["text"]
+            print(f"[LLM] {config_id} success via Anthropic ({len(raw_text)} chars)")
+            return raw_text
+        except Exception as e:
+            print(f"[LLM] Anthropic also failed for {config_id}: {e}")
+
+    raise RuntimeError(f"All LLM backends failed for {config_id}")
 
 
 def call_llm(system_prompt: str, user_prompt: str, config_id: str = "maya") -> dict:
@@ -272,7 +317,7 @@ FORMATTING_RULES = (
 # ---------------------------------------------------------------------------
 
 def _emit_agent_turn(writer, teammate: str, result: dict, include_tts: bool = True):
-    """Emit voice_text → audio_chunk(s) → turn_end for a teammate."""
+    """Emit voice_text → memory_node → audio_chunk(s) → turn_end for a teammate."""
     print(f"[EMIT] voice_text for {teammate}: {result['spoken_message'][:80]}...")
     writer({
         "event": "voice_text",
@@ -282,6 +327,14 @@ def _emit_agent_turn(writer, teammate: str, result: dict, include_tts: bool = Tr
         "sentiment": result["sentiment"],
         "confidence": result["confidence"],
     })
+
+    # Emit memory card so /memory-log populates
+    if result.get("spoken_message"):
+        writer({
+            "event": "memory_node",
+            "teammate": teammate,
+            "content": result["spoken_message"],
+        })
 
     if include_tts:
         _stream_tts(writer, teammate, result["spoken_message"])
@@ -380,6 +433,22 @@ def router_node(state: LabState) -> dict:
         needs_viz = len(medications) >= 1
         size_hint = "small"
 
+    # Hard keyword override: wrist/elbow PT queries always route to mediapipe
+    # (LLM router is non-deterministic and sometimes picks the research path)
+    _MEDIAPIPE_KW = [
+        "wrist flexion", "wrist extension", "wrist rom", "wrist range",
+        "wrist exercise", "wrist pt", "wrist bend", "wrist surgery",
+        "elbow flexion", "elbow extension", "elbow rom", "elbow range",
+        "elbow exercise", "elbow pt", "elbow bend",
+        "forearm rotation", "track my range", "measure my range",
+        "range of motion", "physical therapy exercises", "pt exercises",
+    ]
+    q_lower = state["user_query"].lower()
+    if not needs_mediapipe and not needs_vlm and any(kw in q_lower for kw in _MEDIAPIPE_KW):
+        print(f"[ROUTER] Keyword override → needs_mediapipe=True")
+        needs_mediapipe = True
+        needs_mistral = False  # mediapipe handles this; suppress redundant research path
+
     gpu_tier = pick_gpu(model_params_b=SIZE_TO_PARAMS.get(size_hint, 0.5)) if needs_vlm else None
 
     writer({
@@ -445,6 +514,7 @@ def maya_sandbox_node(state: LabState) -> dict:
     has_image = state.get("has_image", False) and state.get("image_b64")
     needs_mediapipe = state.get("needs_mediapipe", False)
     needs_mistral = state.get("needs_mistral", False)
+    user_query = state["user_query"]
 
     stdout_cb = lambda line: writer({"event": "sandbox_output", "teammate": "maya", "line": line})
     stderr_cb = lambda line: writer({"event": "sandbox_output", "teammate": "maya", "line": f"[stderr] {line}"})
@@ -500,7 +570,7 @@ def maya_sandbox_node(state: LabState) -> dict:
         result = run_in_sandbox(
             code=(
                 f"print('[Maya] MediaPipe wrist/elbow ROM analysis — procedure: {procedure}')\n"
-                f"print('[Maya] Query: {state[\"user_query\"]}')\n"
+                f"print('[Maya] Query: {user_query}')\n"
                 f"print('[Maya] PT restrictions: {restriction_str}')\n"
                 f"print('[Maya] TODO: invoke MediaPipe pose estimation for wrist/elbow angle measurement')\n"
                 f"print('[Maya] TODO: compare measured ROM against restriction thresholds')\n"
@@ -524,7 +594,7 @@ def maya_sandbox_node(state: LabState) -> dict:
         # Placeholder — swap in real code when Mistral sandbox endpoint is wired
         result = run_in_sandbox(
             code=(
-                f"print('[Maya] Mistral medical model — query: {state[\"user_query\"]}')\n"
+                f"print('[Maya] Mistral medical model — query: {user_query}')\n"
                 f"print('[Maya] TODO: call finetuned Mistral endpoint and return clinical answer')\n"
             ),
             packages=[], image_name="research",
@@ -746,6 +816,21 @@ def sol_sandbox_node(state: LabState) -> dict:
         "duration_ms": result.duration_ms,
     })
 
+    # Extract HTML artifact from stdout and emit it to the frontend
+    if result.exit_code == 0 and "[Sol] === HTML_OUTPUT ===" in (result.stdout or ""):
+        try:
+            html = result.stdout.split("[Sol] === HTML_OUTPUT ===\n", 1)[1]
+            html = html.split("[Sol] === END_HTML ===", 1)[0].strip()
+            if html:
+                writer({
+                    "event": "artifact_html",
+                    "teammate": "sol",
+                    "html": html,
+                    "title": "Medication Summary",
+                })
+        except (IndexError, AttributeError):
+            pass
+
     # Sol follows up with a plain-language summary + TTS
     config = LAB_AGENTS["sol"]
     system_prompt = f"{config['system_prompt']}\n\n{FORMATTING_RULES}"
@@ -792,8 +877,21 @@ def sol_text_only_node(state: LabState) -> dict:
     return {"sol_summary": result["spoken_message"]}
 
 
+_PT_EXERCISE_MAP: list[tuple[str, str]] = [
+    ("wrist",    "wrist_flexion"),
+    ("carpal",   "wrist_flexion"),
+    ("flexion",  "wrist_flexion"),
+    ("elbow",    "bicep_curl"),
+    ("bicep",    "bicep_curl"),
+    ("shoulder", "shoulder_abduction"),
+    ("knee",     "knee_extension"),
+    ("squat",    "squat"),
+]
+
+
 def synthesize_node(state: LabState) -> dict:
     """Final synthesis: collate agent outputs. Complete event is emitted by orchestrator."""
+    writer = get_stream_writer()
 
     summary_parts = []
     if state.get("maya_research"):
@@ -802,6 +900,20 @@ def synthesize_node(state: LabState) -> dict:
         summary_parts.append(f"Safety: {state['rex_interactions'][:300]}")
     if state.get("sol_summary"):
         summary_parts.append(f"Summary: {state['sol_summary'][:300]}")
+
+    # Emit PT Studio navigation action when mediapipe was routed
+    if state.get("needs_mediapipe"):
+        query_lower = state.get("user_query", "").lower()
+        pt_exercise = "wrist_flexion"  # default for mediapipe queries
+        for keyword, exercise in _PT_EXERCISE_MAP:
+            if keyword in query_lower:
+                pt_exercise = exercise
+                break
+        writer({
+            "event": "nav_action",
+            "action": "open_pt_studio",
+            "exercise": pt_exercise,
+        })
 
     return {"synthesis": "\n\n".join(summary_parts)}
 

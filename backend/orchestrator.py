@@ -21,11 +21,13 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env.local"))
 # Configuration
 # ==============================================================================
 
-# LLM — Modal vLLM (OpenAI-compatible)
+# LLM — Modal vLLM (OpenAI-compatible) with fallback chain
 MODAL_URL = os.getenv("MODAL_URL", "")
+MODAL_URL_FALLBACK = os.getenv("MODAL_URL_FALLBACK", "https://saibilla21--agentfm-brain-serve-dev.modal.run")
 MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
 
 # APIs
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 SUPERMEMORY_API_KEY = os.getenv("SUPERMEMORY_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -146,9 +148,85 @@ def parse_llm_response(raw_text: str) -> dict:
     }
 
 
+async def call_llm_with_fallback(messages: list[dict], temperature: float = 0.7, max_tokens: int = 2048) -> str:
+    """
+    Tries Modal URL → Modal fallback URL → Anthropic API.
+    Returns the raw LLM response text.
+    """
+    # Build list of Modal URLs to try
+    modal_urls = []
+    if MODAL_URL:
+        modal_urls.append(MODAL_URL)
+    if MODAL_URL_FALLBACK and MODAL_URL_FALLBACK != MODAL_URL:
+        modal_urls.append(MODAL_URL_FALLBACK)
+
+    # Try each Modal endpoint (OpenAI-compatible)
+    for base_url in modal_urls:
+        url = f"{base_url}/v1/chat/completions"
+        payload = {
+            "model": MODEL_NAME,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                print(f"  [LLM] Success via Modal: {base_url}")
+                return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            print(f"  [LLM] Modal failed ({base_url}): {e}")
+            continue
+
+    # Fallback: Anthropic API
+    if ANTHROPIC_API_KEY:
+        print("  [LLM] Falling back to Anthropic API...")
+        try:
+            # Convert messages to Anthropic format (extract system prompt)
+            system_text = ""
+            user_messages = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    system_text += msg["content"] + "\n"
+                else:
+                    user_messages.append(msg)
+            # Ensure we have at least one user message
+            if not user_messages:
+                user_messages = [{"role": "user", "content": "Respond."}]
+
+            anthropic_payload = {
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": max_tokens,
+                "system": system_text.strip(),
+                "messages": user_messages,
+            }
+            headers = {
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers=headers,
+                    json=anthropic_payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                raw_text = data["content"][0]["text"]
+                print(f"  [LLM] Success via Anthropic API")
+                return raw_text
+        except Exception as e:
+            print(f"  [LLM] Anthropic API also failed: {e}")
+
+    raise RuntimeError("All LLM backends failed (Modal + Anthropic)")
+
+
 async def call_llm(agent_id: str, topic: str, conversation_history: str) -> dict:
     """
-    Calls the Modal vLLM API with the strict system prompts.
+    Calls LLM with fallback chain (Modal → Anthropic) using strict system prompts.
     """
     print(f"\n[LLM] Requesting turn for {agent_id.upper()}...")
 
@@ -171,28 +249,18 @@ async def call_llm(agent_id: str, topic: str, conversation_history: str) -> dict
         user_prompt += f"Here is the conversation so far:\n{conversation_history}\n\n"
     user_prompt += f"It is your turn to speak as the {agent_id.capitalize()}."
 
-    url = f"{MODAL_URL}/v1/chat/completions"
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0.7,
-        "max_tokens": 2048,
-    }
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(url, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        raw_text = data["choices"][0]["message"]["content"]
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
+    raw_text = await call_llm_with_fallback(messages)
     return parse_llm_response(raw_text)
 
 
 async def call_debrief_llm(agent_name: str, supermemory_context: str, user_question: str) -> dict:
     """
-    Calls Modal vLLM with the debrief system prompt.
+    Calls LLM with fallback chain (Modal → Anthropic) for debrief.
     """
     system_prompt = f"""You are {agent_name.capitalize()}, an AI analyst who just finished a live debate. You have access to your memory of what you said and thought during the debate.
 
@@ -219,22 +287,12 @@ CRITICAL RULES:
 {{"spoken_message": "The actual words you say aloud", "confidence": 0.85, "sentiment": "analytical"}}
 """
 
-    url = f"{MODAL_URL}/v1/chat/completions"
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Question from the user: '{user_question}'"},
-        ],
-        "temperature": 0.7,
-        "max_tokens": 2048,
-    }
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(url, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        raw_text = data["choices"][0]["message"]["content"]
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Question from the user: '{user_question}'"},
+    ]
 
+    raw_text = await call_llm_with_fallback(messages)
     return parse_llm_response(raw_text)
 
 

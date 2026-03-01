@@ -8,7 +8,15 @@ import type {
   Message, Memory, SandboxEntry, ArtifactSection,
   AgentId, AgentState, DebateMessage, DebriefMessage,
   PipelineNodeId, PipelineNode, DiscoveredWarning,
+  ExerciseId,
 } from "@/types";
+
+export interface VLMScanResult {
+  patient_info?: { name?: string; discharge_date?: string; procedure?: string; doctor?: string };
+  medications: { name: string; dosage: string; frequency: string; instructions: string; warnings?: string }[];
+  restrictions: { activity: string; duration: string; details: string }[];
+  warning_signs: { symptom: string; severity: string; action: string }[];
+}
 
 interface AppState {
   // ── Navigation (patient UI) ──
@@ -107,6 +115,23 @@ interface AppState {
   discoveredWarnings: DiscoveredWarning[];
   addDiscoveredWarning: (w: DiscoveredWarning) => void;
 
+  // ── PT Studio exercise routing ──
+  ptExercise: ExerciseId | null;
+  setPtExercise: (ex: ExerciseId | null) => void;
+
+  // ── Captions (accessibility overlay for TTS audio) ──
+  captionText: string;
+  setCaptionText: (text: string) => void;
+
+  // ── VLM scan state (persists across tab switches) ──
+  scanPreview: string | null;
+  setScanPreview: (img: string | null) => void;
+  scanResult: VLMScanResult | null;
+  setScanResult: (r: VLMScanResult | null) => void;
+  scanMerged: boolean;
+  setScanMerged: (v: boolean) => void;
+  mergeVLMScan: (vlm: VLMScanResult) => void;
+
   // ── Image upload ──
   pendingImage: string | null;
   setPendingImage: (img: string | null) => void;
@@ -157,6 +182,62 @@ export const useAppStore = create<AppState>((set) => ({
   // Discharge data
   discharge: null,
   setDischarge: (data) => set({ discharge: data }),
+
+  // VLM scan state (persists across tab switches)
+  scanPreview: null,
+  setScanPreview: (img) => set({ scanPreview: img }),
+  scanResult: null,
+  setScanResult: (r) => set({ scanResult: r }),
+  scanMerged: false,
+  setScanMerged: (v) => set({ scanMerged: v }),
+
+  // VLM scan merge — map VLM schema → discharge schema, deduplicate, append
+  mergeVLMScan: (vlm) =>
+    set((s) => {
+      if (!s.discharge) return {};
+      const d = s.discharge;
+
+      // Deduplicate medications by lowercase name
+      const existingMedNames = new Set(d.medications.map((m) => m.name.toLowerCase()));
+      const newMeds = vlm.medications
+        .filter((m) => m.name && !existingMedNames.has(m.name.toLowerCase()))
+        .map((m) => ({
+          name: m.name,
+          dosage: m.dosage || "",
+          frequency: m.frequency || "",
+          instructions: m.instructions || "",
+          domain_flags: ["rx-scan"] as string[],
+        }));
+
+      // Deduplicate restrictions by lowercase category
+      const existingCats = new Set(d.restrictions.map((r) => r.category.toLowerCase()));
+      const newRestrictions = vlm.restrictions
+        .filter((r) => r.activity && !existingCats.has(r.activity.toLowerCase()))
+        .map((r) => ({
+          category: r.activity,
+          rule: r.details || "",
+          timeline: r.duration || undefined,
+        }));
+
+      // Deduplicate warning signs by lowercase symptom
+      const existingSymptoms = new Set(d.warning_signs.map((w) => w.symptom.toLowerCase()));
+      const newWarnings = vlm.warning_signs
+        .filter((w) => w.symptom && !existingSymptoms.has(w.symptom.toLowerCase()))
+        .map((w) => ({
+          symptom: w.symptom,
+          implication: w.severity || "",
+          action: w.action || "",
+        }));
+
+      return {
+        discharge: {
+          ...d,
+          medications: [...d.medications, ...newMeds],
+          restrictions: [...d.restrictions, ...newRestrictions],
+          warning_signs: [...d.warning_signs, ...newWarnings],
+        },
+      };
+    }),
 
   // Conversation
   conversation: [],
@@ -263,6 +344,14 @@ export const useAppStore = create<AppState>((set) => ({
   discoveredWarnings: [],
   addDiscoveredWarning: (w) =>
     set((s) => ({ discoveredWarnings: [...s.discoveredWarnings, w] })),
+
+  // PT Studio exercise routing
+  ptExercise: null,
+  setPtExercise: (ex) => set({ ptExercise: ex }),
+
+  // Captions
+  captionText: "",
+  setCaptionText: (text) => set({ captionText: text }),
 
   // Image upload
   pendingImage: null,

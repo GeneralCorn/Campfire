@@ -40,6 +40,7 @@ export function useDebate() {
   const setIsLive = useAppStore((s) => s.setIsLive);
   const setCurrentSessionId = useAppStore((s) => s.setCurrentSessionId);
   const addSandboxEntry = useAppStore((s) => s.addSandboxEntry);
+  const setCaptionText = useAppStore((s) => s.setCaptionText);
 
   /** Mark previous speaker's message as done and set them idle. */
   function finalizePreviousSpeaker() {
@@ -100,6 +101,7 @@ export function useDebate() {
               finalizePreviousSpeaker();
               resetAllTeammateStates();
               setIsStreaming(false);
+              setCaptionText("");
             }
             break;
           }
@@ -145,6 +147,9 @@ export function useDebate() {
               isStreaming: true,
             });
 
+            // Show caption overlay for accessibility
+            if (spokenMessage) setCaptionText(spokenMessage);
+
             currentSpeakerRef.current = { teammateId, msgId };
             break;
           }
@@ -173,6 +178,7 @@ export function useDebate() {
         finalizePreviousSpeaker();
         resetAllTeammateStates();
         setIsStreaming(false);
+        setCaptionText("");
         wsRef.current = null;
       };
 
@@ -211,6 +217,7 @@ export function useDebrief() {
   const setTeammateState = useAppStore((s) => s.setTeammateState);
   const setMessageStreaming = useAppStore((s) => s.setMessageStreaming);
   const resetAllTeammateStates = useAppStore((s) => s.resetAllTeammateStates);
+  const setCaptionText = useAppStore((s) => s.setCaptionText);
 
   const connectDebrief = useCallback(
     (sessionId: string) => {
@@ -268,6 +275,9 @@ export function useDebrief() {
               channel: "hangout",
               isStreaming: true,
             });
+
+            // Show caption overlay for accessibility
+            if (spokenMessage) setCaptionText(spokenMessage);
             break;
           }
 
@@ -283,6 +293,7 @@ export function useDebrief() {
               currentMsgRef.current = null;
             }
             resetAllTeammateStates();
+            setCaptionText("");
             onCompleteRef.current?.();
             break;
           }
@@ -290,6 +301,7 @@ export function useDebrief() {
           case "error": {
             console.error("[Debrief WS]", data.message);
             resetAllTeammateStates();
+            setCaptionText("");
             onCompleteRef.current?.();
             break;
           }

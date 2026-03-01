@@ -3,7 +3,7 @@
 import { useCallback, useRef } from "react";
 import { useAppStore } from "@/stores/useAppStore";
 import { initAudio, playChunk, stopAll } from "@/lib/audio-player";
-import type { TeammateId, TeammateState, PipelineNodeId, ChannelId } from "@/types";
+import type { TeammateId, TeammateState, PipelineNodeId, ChannelId, ExerciseId } from "@/types";
 
 // ── Generic SSE hook ──────────────────────────────────────────────────────────
 // Lightweight hook for flexible SSE/streaming fetch use cases.
@@ -90,6 +90,7 @@ export function useTeamChat() {
   const setIsStreaming        = useAppStore((s) => s.setIsStreaming);
   const setIsLive             = useAppStore((s) => s.setIsLive);
   const addSandboxEntry        = useAppStore((s) => s.addSandboxEntry);
+  const setArtifactSection     = useAppStore((s) => s.setArtifactSection);
   const addMemory              = useAppStore((s) => s.addMemory);
   const addDiscoveredWarning   = useAppStore((s) => s.addDiscoveredWarning);
   const setCurrentSessionId    = useAppStore((s) => s.setCurrentSessionId);
@@ -190,7 +191,7 @@ export function useTeamChat() {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [addMessage, appendToMessage, setTeammateState, setMessageStreaming,
-     resetAllTeammateStates, setIsStreaming, setIsLive, addSandboxEntry,
+     resetAllTeammateStates, setIsStreaming, setIsLive, addSandboxEntry, setArtifactSection,
      addMemory, addDiscoveredWarning, setCurrentSessionId, setPipelineNodeStatus, resetPipeline]
   );
 
@@ -357,6 +358,19 @@ export function useTeamChat() {
         break;
       }
 
+      case "artifact_html": {
+        if (teammate && data.html) {
+          setArtifactSection({
+            id: `artifact-${teammate}-${Date.now()}`,
+            heading: (data.title as string) || "Visualization",
+            content: "",
+            html: data.html as string,
+            authorId: teammate,
+          });
+        }
+        break;
+      }
+
       case "memory_node": {
         if (teammate && data.content) {
           memCounter.current++;
@@ -403,6 +417,16 @@ export function useTeamChat() {
           text: `ERROR: ${data.message}`,
           timestamp: Date.now(),
         });
+        break;
+      }
+
+      case "nav_action": {
+        if (data.action === "open_pt_studio" && data.exercise) {
+          const store = useAppStore.getState();
+          store.setPtExercise(data.exercise as ExerciseId);
+          store.setActiveRoom("pt-studio");
+          store.setPulse("pt-studio", true);
+        }
         break;
       }
 

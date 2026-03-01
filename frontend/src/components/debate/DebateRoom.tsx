@@ -3,6 +3,7 @@
 import { useAppStore } from "@/stores/useAppStore";
 import { TaskInput } from "@/components/team-room/TaskInput";
 import { PipelineGraph } from "./PipelineGraph";
+import { ArtifactPanel } from "./ArtifactPanel";
 import { FlaskConical, Radio } from "lucide-react";
 
 export function DebateRoom() {
@@ -33,9 +34,12 @@ export function DebateRoom() {
         <TaskInput />
       </div>
 
-      {/* Right: pipeline graph */}
-      <div className="w-[340px] shrink-0 border-l border-white/[0.06] bg-surface-1/30">
-        <PipelineGraph />
+      {/* Right: pipeline graph + artifact panel */}
+      <div className="w-[340px] shrink-0 border-l border-white/[0.06] bg-surface-1/30 flex flex-col">
+        <div className="flex-1 min-h-0">
+          <PipelineGraph />
+        </div>
+        <ArtifactPanel />
       </div>
     </div>
   );
