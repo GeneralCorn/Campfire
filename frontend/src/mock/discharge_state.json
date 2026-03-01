@@ -1,0 +1,52 @@
+{
+  "patient_profile": {
+    "procedure": "Right Knee Arthroscopy and Meniscectomy",
+    "discharge_date": "2026-02-28",
+    "attending_physician": "Dr. Sarah Chen, Orthopedics"
+  },
+  "medications": [
+    {
+      "name": "Oxycodone",
+      "dosage": "5mg",
+      "frequency": "Every 4-6 hours as needed for severe pain",
+      "instructions": "Take with food to prevent nausea. Do not drive while taking this medication.",
+      "domain_flags": ["pain_management", "narcotic"]
+    },
+    {
+      "name": "Ibuprofen",
+      "dosage": "600mg",
+      "frequency": "Every 8 hours",
+      "instructions": "Take scheduled around the clock for the first 3 days to manage inflammation.",
+      "domain_flags": ["anti_inflammatory", "scheduled"]
+    }
+  ],
+  "restrictions": [
+    {
+      "category": "Weight Bearing",
+      "rule": "Weight-bearing as tolerated with crutches.",
+      "timeline": "Days 1-3 post-op"
+    },
+    {
+      "category": "Wound Care",
+      "rule": "Keep dressing clean and dry. You may shower after 48 hours but wrap the knee in plastic.",
+      "strict_prohibitions": ["No baths", "No hot tubs", "No swimming for 3 weeks"]
+    },
+    {
+      "category": "Physical Therapy",
+      "rule": "Begin passive knee extension. Do not force flexion past 90 degrees.",
+      "sandbox_trigger": "knee_arc_90_deg"
+    }
+  ],
+  "warning_signs": [
+    {
+      "symptom": "Calf pain or severe swelling",
+      "implication": "Potential Deep Vein Thrombosis (Blood Clot)",
+      "action": "Go to the Emergency Room immediately"
+    },
+    {
+      "symptom": "Fever over 101.5°F",
+      "implication": "Potential infection at the surgical site",
+      "action": "Call Dr. Chen's office"
+    }
+  ]
+}

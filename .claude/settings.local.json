@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.langchain.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ]
+  }
+}

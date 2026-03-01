@@ -1,173 +1,105 @@
 import { create } from "zustand";
 import type {
-  ChannelId,
-  TeammateId,
-  TeammateState,
-  Message,
-  Memory,
-  SandboxEntry,
-  ArtifactSection,
-  AgentId,
-  AgentState,
-  DebateMessage,
-  DebriefMessage,
+  DischargeState, PanelId, ConversationTurn, ActivityEntry,
+  RoomId, LoungeMessage, RoomMessage,
 } from "@/types";
 
 interface AppState {
-  // Navigation
-  activeChannel: ChannelId;
-  setActiveChannel: (channel: ChannelId) => void;
+  // ── Navigation ──
+  activePanel: PanelId;
+  setActivePanel: (panel: PanelId) => void;
 
-  // Teammates
-  teammateStates: Record<TeammateId, TeammateState>;
-  setTeammateState: (id: TeammateId, state: TeammateState) => void;
-  resetAllTeammateStates: () => void;
-  focusedTeammate: TeammateId | null;
-  setFocusedTeammate: (id: TeammateId | null) => void;
-  hangoutTeammate: TeammateId;
-  setHangoutTeammate: (id: TeammateId) => void;
+  // ── Discharge data (loaded once from API / mock) ──
+  discharge: DischargeState | null;
+  setDischarge: (data: DischargeState) => void;
 
-  // Messages
-  messages: Message[];
-  addMessage: (message: Message) => void;
-  appendToMessage: (id: string, delta: string) => void;
-  setMessageStreaming: (id: string, streaming: boolean) => void;
+  // ── Conversation (Ask panel) ──
+  conversation: ConversationTurn[];
+  addTurn: (turn: ConversationTurn) => void;
+  clearConversation: () => void;
 
-  // Sandbox
-  sandboxEntries: SandboxEntry[];
-  addSandboxEntry: (entry: SandboxEntry) => void;
-  artifactSections: ArtifactSection[];
-  setArtifactSection: (section: ArtifactSection) => void;
+  // ── Streaming state ──
+  isStreaming: boolean;
+  setIsStreaming: (v: boolean) => void;
 
-  // Memories
-  memories: Memory[];
-  addMemory: (memory: Memory) => void;
+  // ── Care Team Activity (RightPanel) ──
+  activities: ActivityEntry[];
+  addActivity: (entry: ActivityEntry) => void;
 
-  // UI state
+  // ── Right panel ──
   rightPanelOpen: boolean;
   toggleRightPanel: () => void;
-  isStreaming: boolean;
-  setIsStreaming: (streaming: boolean) => void;
-  demoPlaying: boolean;
-  setDemoPlaying: (playing: boolean) => void;
-  isLive: boolean;
-  setIsLive: (live: boolean) => void;
-  elapsedTime: number;
-  setElapsedTime: (time: number) => void;
 
-  // Debate / Debrief
-  debateStatus: "idle" | "running" | "complete";
-  setDebateStatus: (s: "idle" | "running" | "complete") => void;
-  sessionId: string | null;
-  setSessionId: (id: string | null) => void;
-  agentStates: Record<AgentId, AgentState>;
-  setAgentState: (id: AgentId, patch: Partial<AgentState>) => void;
-  debateTranscript: DebateMessage[];
-  addDebateMessage: (msg: DebateMessage) => void;
-  clearDebateTranscript: () => void;
-  debriefLog: DebriefMessage[];
-  addDebriefMessage: (msg: DebriefMessage) => void;
-  clearDebriefLog: () => void;
-  selectedDebriefAgent: AgentId;
-  setSelectedDebriefAgent: (id: AgentId) => void;
+  // ── Room navigation ──
+  activeRoom: RoomId;
+  setActiveRoom: (room: RoomId) => void;
+
+  // ── Care Team Lounge ──
+  loungeMessages: LoungeMessage[];
+  setLoungeMessages: (msgs: LoungeMessage[]) => void;
+  addLoungeMessage: (msg: LoungeMessage) => void;
+  loungeUnread: boolean;
+  setLoungeUnread: (v: boolean) => void;
+
+  // ── Agent room histories ──
+  medicationRoomHistory: RoomMessage[];
+  addMedicationRoomMessage: (msg: RoomMessage) => void;
+  recoveryRoomHistory: RoomMessage[];
+  addRecoveryRoomMessage: (msg: RoomMessage) => void;
+  emergencyRoomHistory: RoomMessage[];
+  addEmergencyRoomMessage: (msg: RoomMessage) => void;
+
+  // ── Sidebar pulse animations ──
+  pulsedRooms: Partial<Record<RoomId, boolean>>;
+  setPulse: (room: RoomId, v: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
   // Navigation
-  activeChannel: "team-room",
-  setActiveChannel: (channel) => set({ activeChannel: channel }),
+  activePanel: "overview",
+  setActivePanel: (panel) => set({ activePanel: panel }),
 
-  // Teammates
-  teammateStates: { mika: "idle", rune: "idle", sage: "idle" },
-  setTeammateState: (id, state) =>
-    set((s) => ({
-      teammateStates: { ...s.teammateStates, [id]: state },
-    })),
-  resetAllTeammateStates: () =>
-    set({ teammateStates: { mika: "idle", rune: "idle", sage: "idle" } }),
-  focusedTeammate: null,
-  setFocusedTeammate: (id) => set({ focusedTeammate: id }),
-  hangoutTeammate: "mika",
-  setHangoutTeammate: (id) => set({ hangoutTeammate: id }),
+  // Discharge data
+  discharge: null,
+  setDischarge: (data) => set({ discharge: data }),
 
-  // Messages
-  messages: [],
-  addMessage: (message) =>
-    set((s) => ({ messages: [...s.messages, message] })),
-  appendToMessage: (id, delta) =>
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        m.id === id ? { ...m, content: m.content + delta } : m
-      ),
-    })),
-  setMessageStreaming: (id, streaming) =>
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        m.id === id ? { ...m, isStreaming: streaming } : m
-      ),
-    })),
+  // Conversation
+  conversation: [],
+  addTurn: (turn) => set((s) => ({ conversation: [...s.conversation, turn] })),
+  clearConversation: () => set({ conversation: [] }),
 
-  // Sandbox
-  sandboxEntries: [],
-  addSandboxEntry: (entry) =>
-    set((s) => ({ sandboxEntries: [...s.sandboxEntries, entry] })),
-  artifactSections: [],
-  setArtifactSection: (section) =>
-    set((s) => {
-      const existing = s.artifactSections.findIndex(
-        (a) => a.heading === section.heading
-      );
-      if (existing >= 0) {
-        const updated = [...s.artifactSections];
-        updated[existing] = section;
-        return { artifactSections: updated };
-      }
-      return { artifactSections: [...s.artifactSections, section] };
-    }),
-
-  // Memories
-  memories: [],
-  addMemory: (memory) =>
-    set((s) => ({ memories: [...s.memories, memory] })),
-
-  // Debate / Debrief
-  debateStatus: "idle",
-  setDebateStatus: (s) => set({ debateStatus: s }),
-  sessionId: null,
-  setSessionId: (id) => set({ sessionId: id }),
-  agentStates: {
-    scout:       { confidence: 0, sentiment: "neutral", speaking: false, thinking: false, spokenMessage: "" },
-    critic:      { confidence: 0, sentiment: "neutral", speaking: false, thinking: false, spokenMessage: "" },
-    synthesizer: { confidence: 0, sentiment: "neutral", speaking: false, thinking: false, spokenMessage: "" },
-  },
-  setAgentState: (id, patch) =>
-    set((s) => ({
-      agentStates: {
-        ...s.agentStates,
-        [id]: { ...s.agentStates[id], ...patch },
-      },
-    })),
-  debateTranscript: [],
-  addDebateMessage: (msg) =>
-    set((s) => ({ debateTranscript: [...s.debateTranscript, msg] })),
-  clearDebateTranscript: () => set({ debateTranscript: [] }),
-  debriefLog: [],
-  addDebriefMessage: (msg) =>
-    set((s) => ({ debriefLog: [...s.debriefLog, msg] })),
-  clearDebriefLog: () => set({ debriefLog: [] }),
-  selectedDebriefAgent: "scout",
-  setSelectedDebriefAgent: (id) => set({ selectedDebriefAgent: id }),
-
-  // UI state
-  rightPanelOpen: true,
-  toggleRightPanel: () =>
-    set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
+  // Streaming
   isStreaming: false,
-  setIsStreaming: (streaming) => set({ isStreaming: streaming }),
-  demoPlaying: false,
-  setDemoPlaying: (playing) => set({ demoPlaying: playing }),
-  isLive: false,
-  setIsLive: (live) => set({ isLive: live }),
-  elapsedTime: 0,
-  setElapsedTime: (time) => set({ elapsedTime: time }),
+  setIsStreaming: (v) => set({ isStreaming: v }),
+
+  // Activities
+  activities: [],
+  addActivity: (entry) => set((s) => ({ activities: [...s.activities, entry] })),
+
+  // Right panel
+  rightPanelOpen: false,
+  toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
+
+  // Room navigation
+  activeRoom: "lounge",
+  setActiveRoom: (room) => set({ activeRoom: room }),
+
+  // Care Team Lounge
+  loungeMessages: [],
+  setLoungeMessages: (msgs) => set({ loungeMessages: msgs }),
+  addLoungeMessage: (msg) => set((s) => ({ loungeMessages: [...s.loungeMessages, msg] })),
+  loungeUnread: false,
+  setLoungeUnread: (v) => set({ loungeUnread: v }),
+
+  // Agent room histories
+  medicationRoomHistory: [],
+  addMedicationRoomMessage: (msg) => set((s) => ({ medicationRoomHistory: [...s.medicationRoomHistory, msg] })),
+  recoveryRoomHistory: [],
+  addRecoveryRoomMessage: (msg) => set((s) => ({ recoveryRoomHistory: [...s.recoveryRoomHistory, msg] })),
+  emergencyRoomHistory: [],
+  addEmergencyRoomMessage: (msg) => set((s) => ({ emergencyRoomHistory: [...s.emergencyRoomHistory, msg] })),
+
+  // Sidebar pulse animations
+  pulsedRooms: {},
+  setPulse: (room, v) => set((s) => ({ pulsedRooms: { ...s.pulsedRooms, [room]: v } })),
 }));

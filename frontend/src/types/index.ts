@@ -1,88 +1,105 @@
-export type TeammateId = "mika" | "rune" | "sage";
-export type TeammateState = "idle" | "thinking" | "talking";
-export type ChannelId =
-  | "team-room"
-  | "hangout"
-  | "sandbox"
-  | "memories"
-  | "debate"
-  | "debrief";
+// ── Discharge data — mirrors backend/mock_data/discharge_state.json exactly ──
 
-export type AgentId = "scout" | "critic" | "synthesizer";
-
-export interface AgentState {
-  confidence: number;
-  sentiment: string;
-  speaking: boolean;
-  thinking: boolean;
-  spokenMessage: string;
+export interface PatientProfile {
+  procedure: string;
+  discharge_date: string;
+  attending_physician: string;
 }
 
-export interface DebateMessage {
-  id: string;
-  agentId: AgentId | "system";
-  content: string;
-  timestamp: number;
-}
-
-export interface DebriefMessage {
-  id: string;
-  role: "user" | AgentId;
-  content: string;
-  timestamp: number;
-  confidence?: number;
-  sentiment?: string;
-}
-
-export interface Teammate {
-  id: TeammateId;
+export interface Medication {
   name: string;
-  role: string;
-  badge: string;
-  colorHex: string;
-  personality: string;
-  voiceId: string;
+  dosage: string;
+  frequency: string;
+  instructions: string;
+  domain_flags: string[];
 }
 
-export interface Message {
+export interface Restriction {
+  category: string;
+  rule: string;
+  timeline?: string;
+  strict_prohibitions?: string[];
+  sandbox_trigger?: string;
+}
+
+export interface WarnSign {
+  symptom: string;
+  implication: string;
+  action: string;
+}
+
+export interface DischargeState {
+  patient_profile: PatientProfile;
+  medications: Medication[];
+  restrictions: Restriction[];
+  warning_signs: WarnSign[];
+}
+
+// ── Navigation ──
+
+export type PanelId =
+  | "overview"
+  | "medications"
+  | "restrictions"
+  | "warnings"
+  | "ask";
+
+// ── Room-based navigation ──
+
+export type RoomId =
+  | "lounge"
+  | "medication-room"
+  | "recovery-room"
+  | "emergency-room"
+  | "overview"
+  | "medications"
+  | "restrictions"
+  | "warning-signs";
+
+export type AgentName = "Medication Agent" | "Recovery Agent" | "Emergency Agent";
+
+// ── Lounge messages (Slack-style group feed) ──
+
+export interface LoungeMessage {
   id: string;
-  sender: TeammateId | "user" | "system";
-  content: string;
-  thinking?: string;
-  action?: { type: string; detail: string };
-  artifactUpdate?: string;
-  timestamp: number;
-  channel: ChannelId;
-  isStreaming?: boolean;
-}
-
-export interface Memory {
-  id: string;
-  content: string;
-  teammateId: TeammateId;
-  timestamp: number;
-  crossSession?: boolean;
-  referencedBy?: string[];
-}
-
-export interface SSEEvent {
-  event: string;
-  teammate?: TeammateId;
-  [key: string]: unknown;
-}
-
-export interface SandboxEntry {
-  id: string;
-  teammateId: TeammateId;
-  type: "log" | "write" | "flag";
+  agent: AgentName | "user";
   text: string;
   timestamp: number;
 }
 
-export interface ArtifactSection {
+// ── Agent room messages (bubble-style 1-on-1) ──
+
+export interface RoomMessage {
   id: string;
-  heading: string;
-  content: string;
-  authorId: TeammateId;
+  role: "user" | "agent";
+  text: string;
   timestamp: number;
+}
+
+// ── Conversation (Ask panel) ──
+
+export interface ConversationTurn {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+  /** Which domain the router classified this under */
+  domain?: string;
+}
+
+// ── Care Team Activity (RightPanel) ──
+
+export type ActivityRoute =
+  | "medications"
+  | "recovery"
+  | "emergency"
+  | "confer"
+  | "blocked";
+
+export interface ActivityEntry {
+  id: string;
+  timestamp: number;
+  route: ActivityRoute;
+  audio_text: string;
+  off_topic: boolean;
 }

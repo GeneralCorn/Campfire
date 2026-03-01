@@ -1,54 +1,47 @@
-import type { ChannelId } from "@/types";
+import type { PanelId } from "@/types";
 
 export interface Channel {
-  id: ChannelId;
+  id: PanelId;
   name: string;
-  type: "voice" | "text";
+  type: "text" | "voice";
   section: string;
-  description?: string;
+  description: string;
 }
 
 export const channels: Channel[] = [
   {
-    id: "team-room",
-    name: "team-room",
-    type: "voice",
-    section: "VOICE CHANNELS",
-    description: "Your AI team, working together",
-  },
-  {
-    id: "hangout",
-    name: "hangout",
-    type: "voice",
-    section: "VOICE CHANNELS",
-    description: "Voice chat — interrogate any agent about its decisions",
-  },
-  {
-    id: "debate",
-    name: "debate-room",
-    type: "voice",
-    section: "DEBATE",
-    description: "Watch Scout, Critic and Synthesizer argue it out",
-  },
-  {
-    id: "debrief",
-    name: "debrief-room",
-    type: "voice",
-    section: "DEBATE",
-    description: "Interrogate any agent after the debate",
-  },
-  {
-    id: "sandbox",
-    name: "sandbox",
+    id: "overview",
+    name: "overview",
     type: "text",
-    section: "WORKSPACE",
-    description: "Live view of task being executed",
+    section: "PATIENT",
+    description: "Procedure summary and discharge details",
   },
   {
-    id: "memories",
-    name: "memories",
+    id: "medications",
+    name: "medications",
     type: "text",
-    section: "INSIGHTS",
-    description: "Visual graph of team memories",
+    section: "PATIENT",
+    description: "Medication schedule and instructions",
+  },
+  {
+    id: "restrictions",
+    name: "restrictions",
+    type: "text",
+    section: "PATIENT",
+    description: "Activity restrictions and wound care",
+  },
+  {
+    id: "warnings",
+    name: "warning signs",
+    type: "text",
+    section: "PATIENT",
+    description: "Symptoms requiring immediate action",
+  },
+  {
+    id: "ask",
+    name: "ask copilot",
+    type: "voice",
+    section: "COPILOT",
+    description: "Voice Q&A — ask anything about your care plan",
   },
 ];
